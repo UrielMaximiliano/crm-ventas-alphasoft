@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Entorno local
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Datos locales / artefactos
+data/local/
+data/cache/
+models/
+*.sqlite
+*.db
+
+# Docker
+docker-compose.override.yml
+
+# Claude Code (config local de la IDE/CLI)
+.claude/
+
+# Artefactos de export temporales
+leads_test_export.xlsx
+*.xlsx
+!data/templates/*.xlsx

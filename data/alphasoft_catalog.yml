@@ -1,0 +1,100 @@
+# Catalogo de servicios de Alphasoft (alphasoft.cloud).
+# Este archivo se carga a la tabla `catalog_items` al arranque.
+# Reload idempotente: si el contenido cambia, se regenera; si no, no toca nada.
+#
+# Cada item tiene un slug unico estable (no cambiar slugs existentes).
+
+items:
+  - slug: landing-page-pyme
+    name: Landing page para PyMEs
+    category: web
+    short_description: >
+      Sitio web simple, rapido y optimizado para SEO local. Pensado para negocios
+      que hoy no tienen presencia web o tienen un sitio obsoleto.
+    long_description: >
+      Landing en Next.js + Vercel, mobile-first, con secciones de servicios, ubicacion
+      (con Google Maps embebido), horarios, galeria y formulario de contacto.
+      Incluye registro de dominio (opcional), configuracion de Google Search Console
+      y un mes de soporte. Tiempos: 1-2 semanas. Ideal para panaderias, peluquerias,
+      kinesiologos, abogados, inmobiliarias chicas, talleres, veterinarias.
+    target_audience: PyMEs sin sitio o con sitio viejo (Wix/Joomla)
+    price_range: USD 400-800
+
+  - slug: ecommerce-tienda
+    name: Tienda online (e-commerce)
+    category: ecommerce
+    short_description: >
+      Tienda online con catalogo, carrito, pasarela de pagos (MercadoPago) y
+      panel admin. Para vender productos en Argentina sin depender de marketplaces.
+    long_description: >
+      E-commerce a medida con Next.js + Stripe o MercadoPago. Incluye gestion
+      de productos, stock, pedidos, integracion con Andreani/OCA para envios,
+      y reportes basicos. Demo en La Rocka Shop.
+    target_audience: Comercios con productos fisicos o digitales
+    price_range: USD 1200-3000
+
+  - slug: chatbot-whatsapp-ia
+    name: Chatbot WhatsApp con IA
+    category: ia
+    short_description: >
+      Asistente de WhatsApp/Instagram que responde 24/7, agenda turnos y filtra
+      consultas. Integrado con Google Calendar y la herramienta que ya uses.
+    long_description: >
+      Bot para WhatsApp Business o Instagram DM con LLM (GPT/Llama via Groq).
+      Casos: atencion de consultas frecuentes, reserva de turnos, calificacion de
+      leads, derivacion a humano cuando hace falta. Se entrena con el manual de
+      tu negocio. Implementacion: 1-2 semanas.
+    target_audience: Profesionales independientes, consultorios, comercios con muchas consultas
+    price_range: USD 600-1500 + costo de WhatsApp Cloud API
+
+  - slug: web-medida
+    name: Web app a medida
+    category: web
+    short_description: >
+      Aplicacion web a medida para procesos internos: turnero, CRM chico,
+      gestion de pedidos, paneles para empleados, etc.
+    long_description: >
+      Desarrollo end-to-end con React/Next.js + Node.js + Postgres. Autenticacion,
+      roles, dashboards, exportacion a Excel/PDF. Hosting incluido el primer ano.
+      Tiempos: 4-8 semanas segun alcance.
+    target_audience: Empresas con procesos manuales en Excel/papel que quieren digitalizar
+    price_range: USD 2000-8000
+
+  - slug: integraciones-automatizaciones
+    name: Integraciones y automatizaciones
+    category: automatizacion
+    short_description: >
+      Conectar herramientas que ya usas (Google Sheets, MercadoLibre, Tienda Nube,
+      Mailchimp, n8n) para que dejen de pedirte trabajo manual.
+    long_description: >
+      Workflows custom para sincronizar datos entre sistemas: por ejemplo, recibir
+      una orden en Tienda Nube, generar factura en Contabilium, mandar mail al
+      cliente, actualizar planilla. Usamos n8n / scripts a medida segun caso.
+    target_audience: Negocios que pasan horas copiando datos entre apps
+    price_range: USD 300-1500 segun integracion
+
+  - slug: seo-local-google
+    name: SEO local + Google Business
+    category: seo
+    short_description: >
+      Posicionamiento en Google para que tu negocio aparezca cuando alguien busca
+      "tu rubro cerca de mi" en tu ciudad.
+    long_description: >
+      Optimizacion de Google Business Profile, esquema schema.org, contenido
+      orientado a busquedas locales ("panaderia en Cordoba", "kinesiologo Rosario"),
+      auditoria del sitio actual y plan de mejoras. No vendemos humo: trabajamos
+      sobre lo que medimos en Search Console.
+    target_audience: Negocios locales con clientela geografica acotada
+    price_range: USD 200-500 (setup) + USD 100/mes opcional
+
+  - slug: migracion-wix-wordpress
+    name: Migracion desde Wix / WordPress
+    category: web
+    short_description: >
+      Te sacamos del hosting lento y caro de Wix/WordPress sin perder tu posicionamiento.
+    long_description: >
+      Migracion completa a Next.js + Vercel preservando URLs, redirecciones 301
+      y datos historicos de Search Console. El sitio nuevo carga 3-5x mas rapido
+      y reduce el costo mensual de hosting/plugins.
+    target_audience: Sitios en Wix/WordPress que cargan lento o son caros de mantener
+    price_range: USD 500-1200

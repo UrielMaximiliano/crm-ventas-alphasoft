@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+
+{% block title %}Leads - CRM Alphasoft{% endblock %}
+
+{% block content %}
+  {% set scraper_label = "Demo" if mock else "Google Maps" %}
+  {% set llm_label = "Mock" if mock_llm else "Groq" %}
+  {% set status_colors = {
+    "new": "bg-slate-100 text-slate-700",
+    "qualified": "bg-emerald-100 text-emerald-700",
+    "contacted": "bg-blue-100 text-blue-700",
+    "replied": "bg-indigo-100 text-indigo-700",
+    "discarded": "bg-rose-100 text-rose-700"
+  } %}
+  {% set status_labels = {
+    "new": "nuevo",
+    "qualified": "calificado",
+    "contacted": "contactado",
+    "replied": "respondio",
+    "discarded": "descartado"
+  } %}
+  {% set priority_colors = {
+    "rose": "bg-rose-50 text-rose-700 border-rose-200",
+    "amber": "bg-amber-50 text-amber-700 border-amber-200",
+    "slate": "bg-slate-50 text-slate-600 border-slate-200"
+  } %}
+
+  <section class="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="flex-1 min-w-[220px]">
+        <h1 class="text-xl font-semibold leading-tight">Leads de prospeccion</h1>
+        <div class="mt-2 flex flex-wrap gap-2 text-xs">
+          <span class="px-2 py-1 rounded border border-slate-200 bg-slate-50 text-slate-600">
+            Scraper: <span class="font-medium text-slate-800">{{ scraper_label }}</span>
+          </span>
+          <span class="px-2 py-1 rounded border border-slate-200 bg-slate-50 text-slate-600">
+            Mensajes: <span class="font-medium text-slate-800">{{ llm_label }}</span>
+          </span>
+        </div>
+      </div>
+
+      <form method="post" action="/ui/jobs/discover?max_queries=3">
+        <button class="text-sm px-3 py-2 rounded bg-slate-900 text-white hover:bg-slate-700">
+          Buscar leads
+        </button>
+      </form>
+      <form method="post" action="/ui/jobs/enrich">
+        <button class="text-sm px-3 py-2 rounded bg-amber-600 text-white hover:bg-amber-500">
+          Verificar webs
+        </button>
+      </form>
+      <form method="post" action="/ui/jobs/generate">
+        <button class="text-sm px-3 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-500">
+          Generar mensajes
+        </button>
+      </form>
+      <a href="/api/leads/export.xlsx{% if request.url.query %}?{{ request.url.query }}{% endif %}"
+         class="text-sm px-3 py-2 rounded bg-green-800 text-white hover:bg-green-700"
+         title="Descarga los leads filtrados como xlsx para abrir en Excel">
+        Exportar a Excel
+      </a>
+    </div>
+  </section>
+
+  <section class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+    <div class="bg-white border border-slate-200 rounded-lg p-3">
+      <div class="text-xs text-slate-500">Resultados</div>
+      <div class="mt-1 text-2xl font-semibold">{{ stats.total }}</div>
+    </div>
+    <div class="bg-white border border-emerald-200 rounded-lg p-3">
+      <div class="text-xs text-emerald-700">Listos para contactar</div>
+      <div class="mt-1 text-2xl font-semibold text-emerald-700">{{ stats.ready }}</div>
+    </div>
+    <div class="bg-white border border-amber-200 rounded-lg p-3">
+      <div class="text-xs text-amber-700">Sin mensaje</div>
+      <div class="mt-1 text-2xl font-semibold text-amber-700">{{ stats.needs_message }}</div>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-lg p-3">
+      <div class="text-xs text-slate-500">Sin web</div>
+      <div class="mt-1 text-2xl font-semibold">{{ stats.no_web }}</div>
+    </div>
+    <div class="bg-white border border-blue-200 rounded-lg p-3">
+      <div class="text-xs text-blue-700">Contactados</div>
+      <div class="mt-1 text-2xl font-semibold text-blue-700">{{ stats.contacted }}</div>
+    </div>
+  </section>
+
+  <form method="get" action="/" class="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+    <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_160px_auto] gap-3 items-end">
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Ciudad</label>
+        <select name="city" class="w-full text-sm border border-slate-200 rounded px-2 py-2 bg-white">
+          <option value="">Todas</option>
+          {% for c in facets.cities %}
+            <option value="{{ c }}" {% if filters.city == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Rubro</label>
+        <select name="category" class="w-full text-sm border border-slate-200 rounded px-2 py-2 bg-white">
+          <option value="">Todos</option>
+          {% for c in facets.categories %}
+            <option value="{{ c }}" {% if filters.category == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Estado</label>
+        <select name="status" class="w-full text-sm border border-slate-200 rounded px-2 py-2 bg-white">
+          <option value="">Todos</option>
+          {% for s in ["new", "qualified", "contacted", "replied", "discarded"] %}
+            <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>
+              {{ status_labels.get(s, s) }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 md:justify-end">
+        <label class="flex items-center gap-2 text-sm text-slate-700 mr-2">
+          <input type="checkbox" name="only_no_web" value="true" {% if filters.only_no_web %}checked{% endif %} />
+          Solo sin web
+        </label>
+        <button type="submit" class="text-sm px-3 py-2 rounded bg-slate-800 text-white hover:bg-slate-700">
+          Filtrar
+        </button>
+        <a href="/" class="text-sm px-3 py-2 rounded border border-slate-200 hover:bg-slate-100">
+          Limpiar
+        </a>
+      </div>
+    </div>
+  </form>
+
+  <div class="grid gap-4">
+    {% for lead in leads %}
+    <article class="bg-white border border-slate-200 rounded-lg p-5 shadow-sm" id="lead-{{ lead.id }}">
+      <header class="flex flex-wrap items-start justify-between gap-4 mb-4">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-lg font-semibold leading-tight">{{ lead.name }}</h2>
+            <span class="text-xs text-slate-400">#{{ lead.id }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full border {{ priority_colors.get(lead.priority_tone, priority_colors.slate) }}">
+              Prioridad {{ lead.priority_label }}
+            </span>
+          </div>
+          <div class="text-sm text-slate-500 flex flex-wrap gap-x-2 gap-y-1 mt-1">
+            {% if lead.category %}<span>{{ lead.category }}</span>{% endif %}
+            {% if lead.city %}<span>{{ lead.city }}{% if lead.province %}, {{ lead.province }}{% endif %}</span>{% endif %}
+            {% if lead.rating %}<span>{{ "%.1f"|format(lead.rating) }} estrellas</span>{% endif %}
+            {% if lead.reviews_count %}<span>{{ lead.reviews_count }} reviews</span>{% endif %}
+          </div>
+        </div>
+        <div class="flex flex-col items-end gap-2">
+          <span class="text-xs px-2 py-0.5 rounded-full {{ status_colors.get(lead.status, 'bg-slate-100 text-slate-700') }}">
+            {{ status_labels.get(lead.status, lead.status) }}
+          </span>
+          <span class="text-xs px-2 py-1 rounded bg-slate-900 text-white">
+            {{ lead.next_action }}
+          </span>
+        </div>
+      </header>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm mb-4 border-y border-slate-100 py-3">
+        <div>
+          <div class="text-xs uppercase tracking-wide text-slate-400 mb-1">Contacto</div>
+          {% if lead.phone %}<div><span class="text-slate-400">Tel:</span> {{ lead.phone }}</div>{% endif %}
+          {% if lead.email %}<div><span class="text-slate-400">Email:</span> {{ lead.email }}</div>{% endif %}
+          {% if not lead.phone and not lead.email %}<div class="text-amber-700">Sin telefono ni email</div>{% endif %}
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wide text-slate-400 mb-1">Web</div>
+          {% if lead.website %}
+            <a href="{{ lead.website }}" target="_blank" class="text-blue-600 hover:underline break-all">{{ lead.website }}</a>
+            {% if lead.website_status %}<div class="mt-1 text-xs text-slate-500">{{ lead.website_status }}</div>{% endif %}
+          {% else %}
+            <div class="text-amber-700">sin sitio</div>
+          {% endif %}
+          {% if lead.qualification_reason %}
+            <div class="mt-1 text-xs text-slate-500">{{ lead.qualification_reason }}</div>
+          {% endif %}
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wide text-slate-400 mb-1">Origen</div>
+          <div>{{ lead.source_label }}</div>
+          {% if lead.search_query %}<div class="mt-1 text-xs text-slate-500">Busqueda: {{ lead.search_query }}</div>{% endif %}
+          {% if lead.address %}<div class="mt-1 text-xs text-slate-500">{{ lead.address }}</div>{% endif %}
+        </div>
+      </div>
+
+      {% if lead.messages %}
+      <div class="border-t border-slate-100 pt-4 space-y-3">
+        {% for msg in lead.messages %}
+        <div class="bg-slate-50 rounded-md p-3 border border-slate-100">
+          <div class="flex flex-wrap items-center justify-between mb-2 gap-2">
+            <div class="min-w-0">
+              <span class="text-xs font-medium uppercase tracking-wide text-slate-500">{{ msg.channel }}</span>
+              {% if msg.subject %}
+                <span class="ml-2 text-xs text-slate-600">{{ msg.subject }}</span>
+              {% endif %}
+              {% if msg.sent %}
+                <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">enviado</span>
+              {% endif %}
+            </div>
+            <button
+              type="button"
+              data-label="Copiar {{ msg.channel|capitalize }}"
+              class="text-xs px-2 py-1 rounded bg-slate-900 text-white hover:bg-slate-700"
+              onclick="
+                const button = this;
+                const original = button.dataset.label;
+                const pre = button.parentElement.parentElement.querySelector('pre');
+                navigator.clipboard.writeText(pre.innerText);
+                button.innerText = 'Copiado';
+                setTimeout(() => button.innerText = original, 1200);
+              ">
+              Copiar {{ msg.channel|capitalize }}
+            </button>
+          </div>
+          <pre class="whitespace-pre-wrap text-sm text-slate-800 font-sans leading-relaxed">{{ msg.body }}</pre>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="border-t border-slate-100 pt-4 text-sm text-slate-400 italic">
+        Sin mensaje generado.
+      </div>
+      {% endif %}
+
+      <footer class="border-t border-slate-100 pt-3 mt-4 flex flex-wrap gap-2">
+        <form method="post" action="/ui/leads/{{ lead.id }}/generate" class="inline">
+          <button class="text-xs px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-500">
+            {{ "Regenerar mensajes" if lead.messages else "Generar mensajes" }}
+          </button>
+        </form>
+        {% if lead.messages and lead.status != "contacted" %}
+        <form method="post" action="/ui/leads/{{ lead.id }}/mark-sent" class="inline">
+          <button class="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-500">
+            Marcar enviado
+          </button>
+        </form>
+        {% endif %}
+        {% if lead.status != "discarded" %}
+        <form method="post" action="/ui/leads/{{ lead.id }}/discard" class="inline">
+          <button class="text-xs px-2 py-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50">
+            Descartar
+          </button>
+        </form>
+        {% endif %}
+        <a href="/api/leads/{{ lead.id }}" class="text-xs px-2 py-1 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 ml-auto">
+          JSON
+        </a>
+      </footer>
+    </article>
+    {% else %}
+    <div class="bg-white border border-slate-200 rounded-lg p-12 text-center text-slate-500">
+      <div class="mb-3">No hay leads.</div>
+      <form method="post" action="/ui/jobs/discover?max_queries=3">
+        <button class="text-sm px-4 py-2 rounded bg-slate-900 text-white hover:bg-slate-700">
+          Buscar leads
+        </button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+{% endblock %}

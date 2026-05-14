@@ -1,0 +1,209 @@
+{
+  "_comment": "Fixtures para MockLeadProvider. Representa lo que devolveria scrapear Google Maps con 'rubro en ciudad'. Los datos son sinteticos pero plausibles.",
+  "queries": [
+    {
+      "rubro": "panaderia",
+      "city": "Cordoba",
+      "results": [
+        {
+          "name": "Panaderia Las Tres Marias",
+          "category": "Panaderia",
+          "city": "Cordoba",
+          "province": "Cordoba",
+          "phone": "+54 351 4567890",
+          "website": null,
+          "address": "Av. Colon 1234, X5000 Cordoba",
+          "rating": 4.6,
+          "reviews_count": 87,
+          "source_id": "fake:cba-pan-001"
+        },
+        {
+          "name": "Don Pedro Pan",
+          "category": "Panaderia",
+          "city": "Cordoba",
+          "province": "Cordoba",
+          "phone": "+54 351 4781122",
+          "website": "https://donpedropan.wix.com",
+          "address": "Bv. San Juan 245, X5000 Cordoba",
+          "rating": 4.2,
+          "reviews_count": 41,
+          "source_id": "fake:cba-pan-002"
+        },
+        {
+          "name": "La Esquina del Pan",
+          "category": "Panaderia y rosticeria",
+          "city": "Cordoba",
+          "province": "Cordoba",
+          "phone": "+54 351 4922145",
+          "website": null,
+          "address": "27 de Abril 612, X5000 Cordoba",
+          "rating": 4.7,
+          "reviews_count": 162,
+          "source_id": "fake:cba-pan-003"
+        },
+        {
+          "name": "Panaderia Italia",
+          "category": "Panaderia",
+          "city": "Cordoba",
+          "province": "Cordoba",
+          "phone": "+54 351 4634455",
+          "website": "https://panaderiaitalia.com.ar",
+          "address": "Av. Velez Sarsfield 1455, X5000 Cordoba",
+          "rating": 4.4,
+          "reviews_count": 230,
+          "source_id": "fake:cba-pan-004"
+        },
+        {
+          "name": "El Hornito de Tito",
+          "category": "Panaderia artesanal",
+          "city": "Cordoba",
+          "province": "Cordoba",
+          "phone": "+54 351 4566778",
+          "website": null,
+          "address": "Buenos Aires 988, X5000 Cordoba",
+          "rating": 4.9,
+          "reviews_count": 312,
+          "source_id": "fake:cba-pan-005"
+        }
+      ]
+    },
+    {
+      "rubro": "kinesiologo",
+      "city": "Rosario",
+      "results": [
+        {
+          "name": "Kinesiologia Atlas",
+          "category": "Kinesiologo",
+          "city": "Rosario",
+          "province": "Santa Fe",
+          "phone": "+54 341 4234567",
+          "website": "https://atlaskine.wix.com",
+          "address": "San Martin 456, S2000 Rosario",
+          "rating": 4.9,
+          "reviews_count": 56,
+          "source_id": "fake:ros-kine-001"
+        },
+        {
+          "name": "Centro Kinesiologia Norte",
+          "category": "Kinesiologo",
+          "city": "Rosario",
+          "province": "Santa Fe",
+          "phone": "+54 341 4889911",
+          "website": null,
+          "address": "Mendoza 1233, S2000 Rosario",
+          "rating": 4.5,
+          "reviews_count": 41,
+          "source_id": "fake:ros-kine-002"
+        },
+        {
+          "name": "Kine Sur Rehabilitacion",
+          "category": "Kinesiologo y fisioterapia",
+          "city": "Rosario",
+          "province": "Santa Fe",
+          "phone": "+54 341 4356677",
+          "website": "https://kinesur.com.ar",
+          "address": "Av. Pellegrini 4500, S2000 Rosario",
+          "rating": 4.7,
+          "reviews_count": 89,
+          "source_id": "fake:ros-kine-003"
+        },
+        {
+          "name": "Bienestar Kine",
+          "category": "Kinesiologo",
+          "city": "Rosario",
+          "province": "Santa Fe",
+          "phone": "+54 341 4112233",
+          "website": null,
+          "address": "Catamarca 1502, S2000 Rosario",
+          "rating": 4.3,
+          "reviews_count": 22,
+          "source_id": "fake:ros-kine-004"
+        }
+      ]
+    },
+    {
+      "rubro": "abogado",
+      "city": "Mendoza",
+      "results": [
+        {
+          "name": "Estudio Juridico Ferrari & Asoc.",
+          "category": "Estudio juridico",
+          "city": "Mendoza",
+          "province": "Mendoza",
+          "phone": "+54 261 4567788",
+          "website": null,
+          "address": "9 de Julio 1100, M5500 Mendoza",
+          "rating": 4.4,
+          "reviews_count": 18,
+          "source_id": "fake:mza-abog-001"
+        },
+        {
+          "name": "Lopez & Salinas Abogados",
+          "category": "Estudio juridico",
+          "city": "Mendoza",
+          "province": "Mendoza",
+          "phone": "+54 261 4923355",
+          "website": "https://lopezsalinas.com.ar",
+          "address": "San Martin 700, M5500 Mendoza",
+          "rating": 4.6,
+          "reviews_count": 45,
+          "source_id": "fake:mza-abog-002"
+        },
+        {
+          "name": "Dra. Carolina Russo",
+          "category": "Abogada familiar",
+          "city": "Mendoza",
+          "province": "Mendoza",
+          "phone": "+54 261 4231100",
+          "website": null,
+          "address": "Av. Espana 234, M5500 Mendoza",
+          "rating": 5.0,
+          "reviews_count": 12,
+          "source_id": "fake:mza-abog-003"
+        }
+      ]
+    },
+    {
+      "rubro": "veterinaria",
+      "city": "La Plata",
+      "results": [
+        {
+          "name": "Veterinaria Patitas Felices",
+          "category": "Veterinaria",
+          "city": "La Plata",
+          "province": "Buenos Aires",
+          "phone": "+54 221 4556677",
+          "website": null,
+          "address": "Calle 7 entre 47 y 48, La Plata",
+          "rating": 4.8,
+          "reviews_count": 124,
+          "source_id": "fake:lp-vet-001"
+        },
+        {
+          "name": "Centro Veterinario Diagonal",
+          "category": "Veterinaria",
+          "city": "La Plata",
+          "province": "Buenos Aires",
+          "phone": "+54 221 4778899",
+          "website": "https://diagonalvet.com.ar",
+          "address": "Diagonal 74 N 1233, La Plata",
+          "rating": 4.5,
+          "reviews_count": 78,
+          "source_id": "fake:lp-vet-002"
+        },
+        {
+          "name": "Dr. Miguel Sosa - Veterinario a domicilio",
+          "category": "Veterinaria a domicilio",
+          "city": "La Plata",
+          "province": "Buenos Aires",
+          "phone": "+54 221 4998822",
+          "website": null,
+          "address": "Calle 13 N 567, La Plata",
+          "rating": 4.9,
+          "reviews_count": 67,
+          "source_id": "fake:lp-vet-003"
+        }
+      ]
+    }
+  ]
+}

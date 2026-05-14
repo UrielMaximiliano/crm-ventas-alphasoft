@@ -1,0 +1,37 @@
+# Combinaciones de rubro x ciudad que el job `discover` va a buscar.
+# La seleccion es amplia: comercios, servicios profesionales, salud, belleza,
+# gastronomia y oficios. La calificacion real la decide el estado de la web,
+# no el rubro.
+#
+# Tip: empezar con pocas y subir gradualmente para no levantar sospechas
+# de Google Maps. SCRAPER_DAILY_LIMIT recorta la corrida aunque haya muchas.
+
+defaults:
+  country: AR
+  max_results: 5
+
+queries:
+  - { rubro: restaurante,       city: Cordoba,                province: Cordoba }
+  - { rubro: peluqueria,        city: Rosario,                province: Santa Fe }
+  - { rubro: abogado,           city: Mendoza,                province: Mendoza }
+  - { rubro: veterinaria,       city: La Plata,               province: Buenos Aires }
+  - { rubro: hotel boutique,    city: Mar del Plata,          province: Buenos Aires }
+  - { rubro: ferreteria,        city: San Miguel de Tucuman,  province: Tucuman }
+  - { rubro: cafeteria,         city: Cordoba,                province: Cordoba }
+  - { rubro: centro estetica,   city: Rosario,                province: Santa Fe }
+  - { rubro: estudio contable,  city: Mendoza,                province: Mendoza }
+  - { rubro: clinica dental,    city: La Plata,               province: Buenos Aires }
+  - { rubro: agencia turismo,   city: Mar del Plata,          province: Buenos Aires }
+  - { rubro: muebleria,         city: San Miguel de Tucuman,  province: Tucuman }
+  - { rubro: gimnasio,          city: Cordoba,                province: Cordoba }
+  - { rubro: kinesiologo,       city: Rosario,                province: Santa Fe }
+  - { rubro: inmobiliaria,      city: Mendoza,                province: Mendoza }
+  - { rubro: psicologo,         city: La Plata,               province: Buenos Aires }
+  - { rubro: taller mecanico,   city: Mar del Plata,          province: Buenos Aires }
+  - { rubro: imprenta,          city: San Miguel de Tucuman,  province: Tucuman }
+  - { rubro: panaderia,         city: Salta,                  province: Salta }
+  - { rubro: consultorio medico, city: Salta,                 province: Salta }
+  - { rubro: escuela de manejo, city: Salta,                  province: Salta }
+  - { rubro: casa de repuestos, city: Neuquen,                province: Neuquen }
+  - { rubro: coworking,         city: Neuquen,                province: Neuquen }
+  - { rubro: dietetica,         city: Neuquen,                province: Neuquen }
