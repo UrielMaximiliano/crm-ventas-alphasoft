@@ -17,14 +17,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.db.models import Lead, LeadStatus, Message, MessageChannel
+from app.db.models import (
+    FollowUpStatus,
+    FollowUpTask,
+    Lead,
+    LeadNote,
+    LeadStatus,
+    LeadTag,
+    Message,
+    MessageChannel,
+    ReplyClassification,
+    ReplyIntent,
+)
 from app.db.session import get_session, session_scope
 from app.exports import build_leads_filename, build_leads_xlsx
 from app.jobs.discover import run_discover
 from app.jobs.enrich import run_enrich
+from app.jobs.followup import (
+    run_pending_followups,
+    schedule_followups_for_lead,
+)
 from app.jobs.generate import generate_for_lead, run_generate_all
 from app.scheduler import build_scheduler, maybe_run_discover_at_startup
-from app.llm.base import CatalogService, Channel, LeadContext
+from app.llm.base import CatalogService, Channel, GeneratedMessage, LeadContext
 from app.llm.factory import get_llm_client
 from app.rag.catalog import seed_catalog
 from app.rag.retriever import list_all_catalog, search_catalog
@@ -140,7 +155,13 @@ async def _fetch_leads(
     # caigan abajo.
     stmt = (
         select(Lead)
-        .options(selectinload(Lead.messages))
+        .options(
+            selectinload(Lead.messages),
+            selectinload(Lead.notes),
+            selectinload(Lead.tags),
+            selectinload(Lead.follow_ups),
+            selectinload(Lead.reply_classifications),
+        )
         .order_by(Lead.priority_score.desc().nulls_last(), desc(Lead.created_at))
     )
     if city:
@@ -175,7 +196,15 @@ async def _facets(session: AsyncSession) -> dict[str, list[str]]:
 
 async def _get_lead_or_404(session: AsyncSession, lead_id: int) -> Lead:
     result = await session.execute(
-        select(Lead).options(selectinload(Lead.messages)).where(Lead.id == lead_id)
+        select(Lead)
+        .options(
+            selectinload(Lead.messages),
+            selectinload(Lead.notes),
+            selectinload(Lead.tags),
+            selectinload(Lead.follow_ups),
+            selectinload(Lead.reply_classifications),
+        )
+        .where(Lead.id == lead_id)
     )
     lead = result.scalar_one_or_none()
     if lead is None:
@@ -324,6 +353,47 @@ def _lead_to_view(lead: Lead) -> dict:
         "extracted_phones": [
             p.strip() for p in (lead.extracted_phones or "").split("|") if p.strip()
         ],
+        # Workflow comercial
+        "next_followup_at": (
+            lead.next_followup_at.isoformat() if lead.next_followup_at else None
+        ),
+        "last_reply_at": (
+            lead.last_reply_at.isoformat() if lead.last_reply_at else None
+        ),
+        "conversion_value_estimate": lead.conversion_value_estimate,
+        "tags": [t.tag for t in (lead.tags or [])],
+        "notes": [
+            {
+                "id": n.id,
+                "body": n.body,
+                "author": n.author,
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+            for n in (lead.notes or [])
+        ],
+        "follow_ups": [
+            {
+                "id": f.id,
+                "scheduled_for": f.scheduled_for.isoformat() if f.scheduled_for else None,
+                "status": f.status.value if f.status else None,
+                "kind": f.kind,
+                "message_id": f.message_id,
+                "note": f.note,
+            }
+            for f in (lead.follow_ups or [])
+        ],
+        "last_reply_classification": (
+            {
+                "intent": lead.reply_classifications[0].intent.value,
+                "sentiment": lead.reply_classifications[0].sentiment,
+                "summary": lead.reply_classifications[0].summary,
+                "suggested_action": lead.reply_classifications[0].suggested_action,
+                "suggested_reply": lead.reply_classifications[0].suggested_reply,
+                "created_at": lead.reply_classifications[0].created_at.isoformat()
+                              if lead.reply_classifications[0].created_at else None,
+            }
+            if lead.reply_classifications else None
+        ),
     }
 
 
@@ -440,6 +510,314 @@ async def api_jobs_enrich(
     return JSONResponse(stats)
 
 
+@app.post("/api/jobs/followups")
+async def api_jobs_followups(
+    max_tasks: int | None = Query(None, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    stats = await run_pending_followups(session, max_tasks=max_tasks)
+    return JSONResponse(stats.to_dict())
+
+
+# ===== Sugerencia de queries con LLM =====
+
+class SuggestQueriesIn(BaseModel):
+    country: str = "AR"
+    focus: str = "PyMEs con baja madurez digital"
+    count: int = Field(default=10, ge=1, le=30)
+
+
+def _append_query_to_yaml(rubro: str, city: str, province: str | None) -> bool:
+    """Agrega una query al archivo data/search_queries.yml. Devuelve True si la
+    agrego, False si ya existia o el archivo no se pudo escribir."""
+    settings = get_settings()
+    path = settings.data_dir / "search_queries.yml"
+    if not path.exists():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    needle = f"rubro: {rubro}"
+    # Si ya existe la combinacion rubro+ciudad, no duplicar
+    if needle in text and city.lower() in text.lower():
+        return False
+    rubro_clean = rubro.strip().lower()
+    city_clean = city.strip()
+    prov_clean = (province or "").strip()
+    line = (
+        f"  - {{ rubro: {rubro_clean}, city: {city_clean}, "
+        f"province: {prov_clean} }}\n"
+    )
+    try:
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line)
+        return True
+    except OSError:
+        return False
+
+
+@app.post("/api/llm/suggest-queries")
+async def api_llm_suggest_queries(
+    payload: SuggestQueriesIn,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    """Devuelve N combinaciones rubro+ciudad para prospectar.
+
+    Excluye las queries que ya estan en el yml + las que ya estan en DB.
+    """
+    # Cargar queries existentes para evitar duplicados
+    from app.jobs.discover import _load_queries  # import local para evitar ciclo
+    _, existing = _load_queries()
+    existing_texts = [q.text for q in existing]
+    # Tambien los search_query ya en DB
+    db_rows = await session.execute(
+        select(Lead.search_query).where(Lead.search_query.is_not(None)).distinct()
+    )
+    existing_texts.extend([r[0] for r in db_rows.all() if r[0]])
+
+    client = get_llm_client()
+    suggested = await client.suggest_queries(
+        country=payload.country,
+        focus=payload.focus,
+        existing_queries=existing_texts,
+        count=payload.count,
+    )
+    return JSONResponse(
+        [
+            {
+                "rubro": s.rubro,
+                "city": s.city,
+                "province": s.province,
+                "reason": s.reason,
+            }
+            for s in suggested
+        ]
+    )
+
+
+# ===== Notas por lead =====
+
+class NoteIn(BaseModel):
+    body: str
+    author: str | None = None
+
+
+@app.post("/api/leads/{lead_id}/notes")
+async def api_lead_add_note(
+    lead_id: int,
+    payload: NoteIn,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    lead = await _get_lead_or_404(session, lead_id)
+    note = LeadNote(lead_id=lead.id, body=payload.body, author=payload.author)
+    session.add(note)
+    await session.commit()
+    await session.refresh(note)
+    return JSONResponse(
+        {
+            "id": note.id,
+            "lead_id": note.lead_id,
+            "body": note.body,
+            "author": note.author,
+            "created_at": note.created_at.isoformat(),
+        }
+    )
+
+
+@app.delete("/api/leads/{lead_id}/notes/{note_id}")
+async def api_lead_delete_note(
+    lead_id: int,
+    note_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    result = await session.execute(
+        select(LeadNote).where(LeadNote.id == note_id, LeadNote.lead_id == lead_id)
+    )
+    note = result.scalar_one_or_none()
+    if note is None:
+        raise HTTPException(404, "nota no encontrada")
+    await session.delete(note)
+    await session.commit()
+    return JSONResponse({"deleted": True})
+
+
+# ===== Tags =====
+
+class TagIn(BaseModel):
+    tag: str
+
+
+def _normalize_tag(tag: str) -> str:
+    return tag.strip().lower().replace(" ", "-")[:64]
+
+
+@app.post("/api/leads/{lead_id}/tags")
+async def api_lead_add_tag(
+    lead_id: int,
+    payload: TagIn,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    lead = await _get_lead_or_404(session, lead_id)
+    norm = _normalize_tag(payload.tag)
+    if not norm:
+        raise HTTPException(400, "tag invalido")
+    # Verificar duplicado
+    existing = await session.execute(
+        select(LeadTag).where(LeadTag.lead_id == lead.id, LeadTag.tag == norm)
+    )
+    if existing.scalar_one_or_none():
+        return JSONResponse({"tag": norm, "already_exists": True})
+    tag = LeadTag(lead_id=lead.id, tag=norm)
+    session.add(tag)
+    await session.commit()
+    return JSONResponse({"tag": norm, "already_exists": False})
+
+
+@app.delete("/api/leads/{lead_id}/tags/{tag}")
+async def api_lead_remove_tag(
+    lead_id: int,
+    tag: str,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    norm = _normalize_tag(tag)
+    result = await session.execute(
+        select(LeadTag).where(LeadTag.lead_id == lead_id, LeadTag.tag == norm)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "tag no encontrado")
+    await session.delete(row)
+    await session.commit()
+    return JSONResponse({"deleted": True, "tag": norm})
+
+
+# ===== Clasificacion de respuestas =====
+
+class ClassifyReplyIn(BaseModel):
+    raw_reply: str
+
+
+@app.post("/api/leads/{lead_id}/classify-reply")
+async def api_lead_classify_reply(
+    lead_id: int,
+    payload: ClassifyReplyIn,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    lead = await _get_lead_or_404(session, lead_id)
+    # Construir contexto
+    ctx = LeadContext(
+        name=lead.name,
+        category=lead.category,
+        city=lead.city,
+        province=lead.province,
+        country=lead.country or "AR",
+        has_website=bool(lead.website),
+        website=lead.website,
+        website_status=lead.website_status,
+        rating=lead.rating,
+        qualification_reason=lead.qualification_reason,
+        site_analysis=lead.site_analysis,
+        pain_points=lead.pain_points,
+        recommended_service=lead.recommended_service,
+    )
+    catalog_items = await list_all_catalog(session)
+    catalog = [
+        CatalogService(
+            slug=i.slug, name=i.name, short_description=i.short_description,
+            long_description=i.long_description, target_audience=i.target_audience,
+            price_range=i.price_range,
+        ) for i in catalog_items
+    ]
+    previous = [
+        GeneratedMessage(
+            channel=m.channel.value, body=m.body, subject=m.subject,
+            model=m.model or "", prompt_version=m.prompt_version or "",
+        ) for m in sorted(lead.messages, key=lambda x: x.generated_at)
+    ]
+
+    client = get_llm_client()
+    analysis = await client.classify_reply(
+        ctx, payload.raw_reply, catalog, previous_messages=previous,
+    )
+
+    # Persistir
+    rc = ReplyClassification(
+        lead_id=lead.id,
+        raw_reply=payload.raw_reply,
+        intent=ReplyIntent(analysis.intent),
+        sentiment=analysis.sentiment,
+        summary=analysis.summary,
+        suggested_action=analysis.suggested_action,
+        suggested_reply=analysis.suggested_reply,
+        model=analysis.model,
+    )
+    session.add(rc)
+
+    # Actualizar status + last_reply_at del lead
+    lead.last_reply_at = datetime.now(timezone.utc)
+    if analysis.intent in ("not_interested", "spam", "wrong_contact"):
+        lead.status = LeadStatus.DISCARDED
+    elif lead.status in (LeadStatus.CONTACTED, LeadStatus.QUALIFIED, LeadStatus.NEW):
+        lead.status = LeadStatus.REPLIED
+    # Cancelar followups pendientes
+    pending = await session.execute(
+        select(FollowUpTask).where(
+            FollowUpTask.lead_id == lead.id,
+            FollowUpTask.status == FollowUpStatus.PENDING,
+        )
+    )
+    for t in pending.scalars().all():
+        t.status = FollowUpStatus.SKIPPED
+        t.note = "lead respondio: " + analysis.intent
+        t.done_at = datetime.now(timezone.utc)
+    lead.next_followup_at = None
+
+    await session.commit()
+    await session.refresh(rc)
+    return JSONResponse(
+        {
+            "id": rc.id,
+            "intent": rc.intent.value,
+            "sentiment": rc.sentiment,
+            "summary": rc.summary,
+            "suggested_action": rc.suggested_action,
+            "suggested_reply": rc.suggested_reply,
+            "lead_status": lead.status.value,
+        }
+    )
+
+
+# ===== Follow-ups: schedule manual + generate one-shot =====
+
+class ScheduleFollowupsIn(BaseModel):
+    base_dt: datetime | None = None
+
+
+@app.post("/api/leads/{lead_id}/schedule-followups")
+async def api_lead_schedule_followups(
+    lead_id: int,
+    payload: ScheduleFollowupsIn,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    lead = await _get_lead_or_404(session, lead_id)
+    tasks = await schedule_followups_for_lead(session, lead, base_dt=payload.base_dt)
+    await session.commit()
+    return JSONResponse(
+        {
+            "lead_id": lead.id,
+            "scheduled": len(tasks),
+            "tasks": [
+                {"id": t.id, "scheduled_for": t.scheduled_for.isoformat()}
+                for t in tasks
+            ],
+            "next_followup_at": (
+                lead.next_followup_at.isoformat() if lead.next_followup_at else None
+            ),
+        }
+    )
+
+
 @app.post("/api/leads/{lead_id}/generate-message")
 async def api_lead_generate_message(
     lead_id: int,
@@ -489,6 +867,11 @@ async def api_lead_mark_sent(
         updated += 1
     if updated and lead.status in (LeadStatus.NEW, LeadStatus.QUALIFIED):
         lead.status = LeadStatus.CONTACTED
+        # Programar cadencia de follow-ups automatica (5/14/30 dias)
+        try:
+            await schedule_followups_for_lead(session, lead)
+        except Exception:
+            logger.exception("No se pudieron programar followups para %s", lead.name)
     await session.commit()
     return JSONResponse(
         {"lead_id": lead.id, "status": lead.status.value, "messages_marked": updated}
@@ -605,8 +988,340 @@ async def ui_lead_mark_sent(
             m.sent_at = now
     if lead.status in (LeadStatus.NEW, LeadStatus.QUALIFIED):
         lead.status = LeadStatus.CONTACTED
+        try:
+            await schedule_followups_for_lead(session, lead)
+        except Exception:
+            logger.exception("No se pudieron programar followups para %s", lead.name)
     await session.commit()
     return _redirect_home(request)
+
+
+# ----- UI forms para notas, tags, classify-reply -----
+
+@app.post("/ui/leads/{lead_id}/notes")
+async def ui_lead_add_note(
+    lead_id: int,
+    request: Request,
+    body: str = "",
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    """Recibe form-encoded body=<texto>. Si vacio, no crea nada."""
+    body = (body or "").strip()
+    if body:
+        lead = await _get_lead_or_404(session, lead_id)
+        session.add(LeadNote(lead_id=lead.id, body=body[:10_000]))
+        await session.commit()
+    return _redirect_home(request)
+
+
+@app.post("/ui/leads/{lead_id}/tags")
+async def ui_lead_add_tag(
+    lead_id: int,
+    request: Request,
+    tag: str = "",
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    norm = _normalize_tag(tag or "")
+    if norm:
+        lead = await _get_lead_or_404(session, lead_id)
+        exists = await session.execute(
+            select(LeadTag).where(LeadTag.lead_id == lead.id, LeadTag.tag == norm)
+        )
+        if not exists.scalar_one_or_none():
+            session.add(LeadTag(lead_id=lead.id, tag=norm))
+            await session.commit()
+    return _redirect_home(request)
+
+
+@app.post("/ui/leads/{lead_id}/tags/{tag}/remove")
+async def ui_lead_remove_tag(
+    lead_id: int,
+    tag: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    norm = _normalize_tag(tag)
+    result = await session.execute(
+        select(LeadTag).where(LeadTag.lead_id == lead_id, LeadTag.tag == norm)
+    )
+    row = result.scalar_one_or_none()
+    if row is not None:
+        await session.delete(row)
+        await session.commit()
+    return _redirect_home(request)
+
+
+@app.post("/ui/leads/{lead_id}/classify-reply")
+async def ui_lead_classify_reply(
+    lead_id: int,
+    request: Request,
+    raw_reply: str = "",
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    """Recibe form-encoded raw_reply=<texto del cliente>, clasifica y persiste."""
+    raw_reply = (raw_reply or "").strip()
+    if not raw_reply:
+        return _redirect_home(request)
+    # Reutiliza el endpoint API
+    try:
+        await api_lead_classify_reply(
+            lead_id, ClassifyReplyIn(raw_reply=raw_reply), session
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Falla en ui_lead_classify_reply")
+    return _redirect_home(request)
+
+
+@app.post("/ui/jobs/followups")
+async def ui_jobs_followups(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    await run_pending_followups(session)
+    return _redirect_home(request)
+
+
+@app.post("/ui/llm/suggest-queries", response_class=HTMLResponse)
+async def ui_llm_suggest_queries(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    """Devuelve un fragmento HTML (HTMX) con sugerencias del LLM."""
+    from app.jobs.discover import _load_queries
+
+    _, existing = _load_queries()
+    existing_texts = [q.text for q in existing]
+    db_rows = await session.execute(
+        select(Lead.search_query).where(Lead.search_query.is_not(None)).distinct()
+    )
+    existing_texts.extend([r[0] for r in db_rows.all() if r[0]])
+
+    client = get_llm_client()
+    try:
+        suggested = await client.suggest_queries(
+            country="AR",
+            focus="PyMEs argentinas con baja madurez digital",
+            existing_queries=existing_texts,
+            count=10,
+        )
+    except Exception as exc:
+        logger.exception("suggest_queries fallo")
+        return HTMLResponse(
+            f'<div class="bg-rose-50 border border-rose-200 rounded p-3 text-sm text-rose-700">'
+            f'Error al pedir sugerencias: {exc!s}</div>'
+        )
+
+    if not suggested:
+        return HTMLResponse(
+            '<div class="bg-slate-50 border border-slate-200 rounded p-3 text-sm text-slate-500">'
+            'El LLM no devolvio sugerencias.</div>'
+        )
+
+    rows_html = []
+    for s in suggested:
+        prov = s.province or ""
+        rows_html.append(f"""
+        <li class="flex items-start gap-2 p-2 border-b border-purple-100 last:border-b-0">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-slate-800">
+              {s.rubro} · {s.city}{' · ' + prov if prov else ''}
+            </div>
+            <div class="text-xs text-slate-500 mt-0.5">{s.reason}</div>
+          </div>
+          <form method="post" action="/ui/llm/add-suggested-query" class="inline">
+            <input type="hidden" name="rubro" value="{s.rubro}" />
+            <input type="hidden" name="city" value="{s.city}" />
+            <input type="hidden" name="province" value="{prov}" />
+            <button class="text-xs px-2 py-1 rounded bg-purple-700 text-white hover:bg-purple-600 whitespace-nowrap"
+                    title="Agrega esta query a data/search_queries.yml">
+              Agregar
+            </button>
+          </form>
+        </li>""")
+
+    body = f"""
+    <div class="bg-white border border-purple-200 rounded-lg p-3 shadow-sm">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-semibold text-purple-800">
+          {len(suggested)} sugerencias del LLM
+        </span>
+        <button class="text-xs text-slate-400 hover:text-slate-700"
+                onclick="document.getElementById('suggest-queries-target').innerHTML=''">
+          cerrar
+        </button>
+      </div>
+      <ul class="divide-y divide-purple-50">
+        {''.join(rows_html)}
+      </ul>
+      <div class="text-[11px] text-slate-500 mt-2">
+        Clickeá "Agregar" para sumarlas a <code>data/search_queries.yml</code>.
+        Después usá "Pipeline completo" para buscar leads de esas queries.
+      </div>
+    </div>"""
+    return HTMLResponse(body)
+
+
+@app.post("/ui/llm/add-suggested-query")
+async def ui_llm_add_suggested_query(
+    request: Request,
+    rubro: str = "",
+    city: str = "",
+    province: str = "",
+) -> RedirectResponse:
+    if rubro and city:
+        _append_query_to_yaml(rubro, city, province or None)
+    return _redirect_home(request)
+
+
+# ----- Stats / Dashboard -----
+
+async def _build_stats(session: AsyncSession) -> dict:
+    """Snapshot del pipeline comercial. Lo consume /api/stats y /stats."""
+    total_leads = (await session.execute(select(func.count(Lead.id)))).scalar() or 0
+
+    # Leads por estado
+    by_status_rows = await session.execute(
+        select(Lead.status, func.count(Lead.id)).group_by(Lead.status)
+    )
+    by_status = {s.value: c for s, c in by_status_rows.all()}
+
+    # Leads calificados sin contactar
+    qualified_ready = (
+        await session.execute(
+            select(func.count(Lead.id)).where(
+                Lead.status == LeadStatus.QUALIFIED,
+                Lead.qualified.is_(True),
+            )
+        )
+    ).scalar() or 0
+
+    # Leads contactados
+    contacted = by_status.get(LeadStatus.CONTACTED.value, 0)
+    replied = by_status.get(LeadStatus.REPLIED.value, 0)
+    discarded = by_status.get(LeadStatus.DISCARDED.value, 0)
+
+    # Conversion rate (replied / contacted)
+    reach_rate = (
+        round((replied / contacted) * 100, 1) if contacted else 0.0
+    )
+
+    # Leads con contacto (telefono o email)
+    leads_with_contact = (
+        await session.execute(
+            select(func.count(Lead.id)).where(
+                or_safe := (Lead.phone.is_not(None) | Lead.email.is_not(None))
+            )
+        )
+    ).scalar() or 0
+
+    # Leads con email extraido del HTML
+    leads_with_email = (
+        await session.execute(
+            select(func.count(Lead.id)).where(Lead.email.is_not(None))
+        )
+    ).scalar() or 0
+
+    # Mensajes generados
+    total_messages = (await session.execute(select(func.count(Message.id)))).scalar() or 0
+    sent_messages = (
+        await session.execute(select(func.count(Message.id)).where(Message.sent.is_(True)))
+    ).scalar() or 0
+
+    # Follow-ups
+    pending_followups = (
+        await session.execute(
+            select(func.count(FollowUpTask.id)).where(
+                FollowUpTask.status == FollowUpStatus.PENDING
+            )
+        )
+    ).scalar() or 0
+    due_followups = (
+        await session.execute(
+            select(func.count(FollowUpTask.id)).where(
+                FollowUpTask.status == FollowUpStatus.PENDING,
+                FollowUpTask.scheduled_for <= datetime.now(timezone.utc),
+            )
+        )
+    ).scalar() or 0
+
+    # Por ciudad y rubro (top 8)
+    by_city_rows = await session.execute(
+        select(Lead.city, func.count(Lead.id))
+        .where(Lead.city.is_not(None))
+        .group_by(Lead.city)
+        .order_by(func.count(Lead.id).desc())
+        .limit(8)
+    )
+    by_city = [{"city": c, "count": n} for c, n in by_city_rows.all()]
+
+    by_cat_rows = await session.execute(
+        select(Lead.category, func.count(Lead.id))
+        .where(Lead.category.is_not(None))
+        .group_by(Lead.category)
+        .order_by(func.count(Lead.id).desc())
+        .limit(8)
+    )
+    by_category = [{"category": c, "count": n} for c, n in by_cat_rows.all()]
+
+    # Distribucion de scores
+    score_buckets_rows = await session.execute(
+        select(
+            func.coalesce(Lead.priority_score, 0).label("score"),
+            func.count(Lead.id),
+        )
+        .where(Lead.priority_score.is_not(None))
+        .group_by(Lead.priority_score)
+        .order_by(Lead.priority_score.desc())
+    )
+    by_score = [{"score": int(s), "count": int(n)} for s, n in score_buckets_rows.all()]
+
+    # Top reply intents
+    by_intent_rows = await session.execute(
+        select(ReplyClassification.intent, func.count(ReplyClassification.id))
+        .group_by(ReplyClassification.intent)
+    )
+    by_intent = [{"intent": i.value, "count": int(n)} for i, n in by_intent_rows.all()]
+
+    return {
+        "total_leads": int(total_leads),
+        "by_status": by_status,
+        "qualified_ready": int(qualified_ready),
+        "contacted": int(contacted),
+        "replied": int(replied),
+        "discarded": int(discarded),
+        "reach_rate_pct": reach_rate,
+        "leads_with_contact": int(leads_with_contact),
+        "leads_with_email": int(leads_with_email),
+        "total_messages": int(total_messages),
+        "sent_messages": int(sent_messages),
+        "pending_followups": int(pending_followups),
+        "due_followups": int(due_followups),
+        "by_city": by_city,
+        "by_category": by_category,
+        "by_score": by_score,
+        "by_intent": by_intent,
+    }
+
+
+@app.get("/api/stats")
+async def api_stats(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    return JSONResponse(await _build_stats(session))
+
+
+@app.get("/stats", response_class=HTMLResponse)
+async def stats_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    settings = get_settings()
+    stats = await _build_stats(session)
+    return templates.TemplateResponse(
+        request=request,
+        name="stats.html",
+        context={"stats": stats, "mock": settings.mock_scraper, "mock_llm": settings.mock_llm},
+    )
 
 
 # ----- API: catalogo / RAG -----

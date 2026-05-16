@@ -2,7 +2,9 @@
 
 > Agente de prospección comercial autohosted en Docker para [Alphasoft](https://www.alphasoft.cloud/). Encuentra negocios argentinos sin presencia web decente, extrae sus datos de contacto y arma mensajes de apertura listos para enviar.
 
-El sistema combina **Scrapling** (scraping de Google Maps con browser anti-bot), **Groq** (LLM Llama 3.3 70B para redactar mensajes en español argentino) y **Postgres + pgvector** sobre **FastAPI**. Todo corre 100% local en Docker, sin servicios externos pagos más allá de Groq (que tiene un tier free generoso).
+El sistema combina **Scrapling** (scraping de Google Maps con browser anti-bot), **Groq** (LLM Llama 3.3 70B para redactar mensajes en español argentino, analizar sitios, clasificar respuestas y sugerir queries) y **Postgres + pgvector** sobre **FastAPI**. Todo corre 100% local en Docker, sin servicios externos pagos más allá de Groq (que tiene un tier free generoso).
+
+**Workflow CRM B2B completo**: scraping de Maps → análisis del sitio con LLM → score 1-10 → mensaje WhatsApp+Email → cadencia automática de follow-ups (5/14/30 días) → clasificación de respuestas del cliente con LLM → dashboard con funnel, tasa de respuesta, breakdown por ciudad/rubro/score/intent → export Excel con 26 columnas.
 
 > **⚠️ Importante — no es un auto-sender.**
 > El sistema **NO envía mensajes automáticamente**. Solo prepara el WhatsApp y el Email; el operador los copia y los envía manualmente. Esto evita bloqueos de WhatsApp/Meta y cumple con la **Ley 25.326** (Datos Personales) en Argentina, que considera spam el envío masivo no opt-in. Es un *asistente de prospección*, no un *bot de spam*.
@@ -18,6 +20,12 @@ El sistema combina **Scrapling** (scraping de Google Maps con browser anti-bot),
 - **Rating de Google** + sitio web si tiene.
 - **Diagnóstico del sitio**: si no tiene, si está caído, si es Wix viejo, si es un link a Instagram/WhatsApp, si es lento, etc.
 - **Razón por la que es lead calificado** (legible para humanos).
+- **Score 1-10 del LLM** con razón en 1 línea: tan pronto como entendas el lead, sabés si vale la pena trabajarlo.
+- **Análisis del sitio + pain points** detectados por el LLM (más allá de las heurísticas estáticas).
+- **Servicio del catálogo Alphasoft sugerido** por el LLM para este lead específico.
+- **Cadencia de follow-ups automática** (5/14/30 días) que el LLM genera con ángulos distintos al primer mensaje.
+- **Clasificador de respuestas**: cuando el cliente responde, el LLM detecta intent (interested / pricing / not_interested / ...), sentiment, resumen, próximo paso y mensaje sugerido para responder.
+- **Notas internas** + **tags** para que el equipo deje contexto y segmente.
 - **Dos mensajes listos**:
   - WhatsApp corto (3-4 líneas, voseo, casual)
   - Email más largo (asunto + cuerpo, firma con datos de contacto de Alphasoft)

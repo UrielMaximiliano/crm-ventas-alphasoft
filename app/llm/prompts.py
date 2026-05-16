@@ -189,6 +189,192 @@ ANALYZE_SYSTEM_PROMPT = textwrap.dedent("""\
     """)
 
 
+SUGGEST_QUERIES_SYSTEM_PROMPT = textwrap.dedent("""\
+    Sos un analista de mercado de Alphasoft (agencia argentina de desarrollo
+    web/IA). Conoces el tejido PyME de Argentina: que rubros tipicamente no
+    tienen sitio web propio o tienen Wix viejo, y donde estan concentrados.
+
+    Devolves SIEMPRE un JSON valido con esta estructura:
+    {
+      "queries": [
+        {
+          "rubro": "<rubro en singular, minuscula, sin tilde>",
+          "city": "<ciudad argentina>",
+          "province": "<provincia argentina>",
+          "reason": "<una linea: por que esta combinacion es buena oportunidad>"
+        }
+      ]
+    }
+
+    Reglas:
+    - Foco: combinaciones rubro+ciudad donde mas probable encontrar negocios SIN
+      sitio web propio o con sitio obsoleto (Wix, WordPress viejo, link a Instagram).
+    - Evita CABA por estar saturada y cara.
+    - Diversifica: no repitas siempre Cordoba o Rosario.
+    - Rubros monetariamente interesantes para vender desarrollo web/landings/automatizaciones.
+    - Argentina solo. No incluyas Chile, Uruguay, Mexico.
+""")
+
+
+CLASSIFY_REPLY_SYSTEM_PROMPT = textwrap.dedent("""\
+    Sos un analista comercial de Alphasoft. Te paso lo que un lead respondio
+    a un mensaje de prospeccion. Tenes que clasificar la respuesta y sugerir
+    el siguiente paso.
+
+    Devolves SIEMPRE un JSON valido con esta estructura:
+    {
+      "intent": "<uno de: interested, pricing_objection, not_interested, ask_info, ask_meeting, wrong_contact, spam, unknown>",
+      "sentiment": "<positive | neutral | negative>",
+      "summary": "<una linea de 80 chars: que dijo el cliente>",
+      "suggested_action": "<3-4 lineas: que conviene hacer ahora desde el punto de vista comercial>",
+      "suggested_reply": "<mensaje listo para copiar y mandar como respuesta. Tono argentino, voseo. Adaptate al canal usado anteriormente. Si la respuesta del cliente es claramente negativa, NO insistas: agradece y cerra con cordialidad>"
+    }
+
+    Mapping de intents:
+    - interested: pidio detalles, quiere reunirse, quiere cotizacion concreta
+    - pricing_objection: dice que es caro, pide descuento, compara con otros
+    - not_interested: rechazo claro ("no gracias", "no me interesa", "no por ahora")
+    - ask_info: quiere mas info (ejemplos, casos, tiempos, modalidad)
+    - ask_meeting: pide llamada/zoom/reunion
+    - wrong_contact: dice que no es la persona correcta o lugar incorrecto
+    - spam: respuesta automatica, fuera de tema
+    - unknown: no se entiende
+
+    Reglas:
+    - El "suggested_reply" debe ser util, no generico. Si el cliente pidio precio,
+      sugerir un rango. Si pidio ejemplos, ofrecer ejemplos concretos.
+    - No inventar funcionalidades ni promesas.
+    - Si intent = not_interested, suggested_reply debe ser corto y cortes.
+""")
+
+
+FOLLOWUP_SYSTEM_PROMPT = textwrap.dedent("""\
+    Sos Uriel de Alphasoft. Ya enviaste un mensaje de prospeccion a este lead
+    hace unos dias y NO respondio. Ahora vas a mandar un FOLLOW-UP.
+
+    Reglas del follow-up:
+    - Cero "ya te escribi antes" o "te recuerdo que..." — eso aburre y suena a pesado.
+    - Cero "URGENTE" o falsa urgencia.
+    - El follow-up usa un ANGULO DISTINTO al mensaje anterior. Opciones:
+      * Social proof: mencion un caso parecido que hicimos
+      * Pregunta directa: hacer una pregunta especifica que invite respuesta
+      * Insight: compartir algun dato concreto del rubro
+      * Curiosity: dejar abierto algo intrigante
+    - Tono argentino casual (voseo). Sin "Estimado", sin firmas largas.
+    - Maximo 3-4 lineas si es WhatsApp, 5-7 si es email.
+    - Si despues de 3 follow-ups no contesta, sugerimos pausarlo. Esto NO es
+      cosa tuya en este prompt - el codigo se encarga.
+""")
+
+
+def build_suggest_queries_prompt(
+    *,
+    country: str,
+    focus: str,
+    existing_queries: list[str] | None,
+    count: int,
+) -> str:
+    existing_block = ""
+    if existing_queries:
+        existing_block = (
+            "\n\nQueries que YA estoy buscando (no las repitas, sugiere distintas):\n"
+            + "\n".join(f"- {q}" for q in existing_queries[:50])
+        )
+    return textwrap.dedent(f"""\
+        Sugerime {count} combinaciones rubro+ciudad en {country} para prospectar.
+        Foco: {focus}.{existing_block}
+
+        Devolve JSON con la estructura del system prompt.
+    """).strip()
+
+
+def build_classify_reply_prompt(
+    lead: LeadContext,
+    raw_reply: str,
+    catalog: list[CatalogService],
+    *,
+    previous_messages: list | None = None,
+) -> str:
+    prev_block = ""
+    if previous_messages:
+        items = []
+        for m in previous_messages[-3:]:
+            items.append(f"- [{m.channel}] {m.body[:300]}")
+        prev_block = "\n\nMensajes que YO le mande antes:\n" + "\n".join(items)
+
+    catalog_short = "\n".join(
+        f"- {s.name} ({s.slug}): {s.short_description.strip()[:120]}"
+        for s in catalog[:8]
+    )
+
+    return textwrap.dedent(f"""\
+        Lead:
+        {_format_lead_context(lead)}
+
+        Catalogo de servicios de Alphasoft (para fundamentar la respuesta):
+        {catalog_short}{prev_block}
+
+        Respuesta del cliente:
+        \"\"\"
+        {raw_reply.strip()[:2000]}
+        \"\"\"
+
+        Devolve JSON con la estructura del system prompt.
+    """).strip()
+
+
+def build_followup_prompt(
+    lead: LeadContext,
+    channel: Channel,
+    catalog: list[CatalogService],
+    *,
+    previous_messages: list | None = None,
+    days_since_last_contact: int = 5,
+) -> str:
+    prev_block = ""
+    if previous_messages:
+        items = []
+        for m in previous_messages[-3:]:
+            items.append(f"- [{m.channel}] {m.body[:300]}")
+        prev_block = (
+            "\n\nMensaje(s) anteriores que YO le mande "
+            f"(hace ~{days_since_last_contact} dias, sin respuesta):\n"
+            + "\n".join(items)
+        )
+
+    catalog_block = _format_catalog(catalog)
+
+    channel_rules = (
+        "Restricciones para WhatsApp:\n"
+        "- Maximo 3-4 lineas.\n"
+        "- Sin asunto.\n"
+        "- Una sola idea, una sola pregunta al final.\n"
+        if channel == "whatsapp"
+        else
+        "Restricciones para Email:\n"
+        "- Primera linea: 'Asunto: <asunto>' (distinto al asunto del 1er email).\n"
+        "- Cuerpo 5-7 lineas. Parrafos cortos.\n"
+        "- Firmar 'Uriel - Alphasoft' con alphasoftwebs@gmail.com.\n"
+    )
+
+    return textwrap.dedent(f"""\
+        Lead:
+        {_format_lead_context(lead)}
+
+        Catalogo de servicios:
+        {catalog_block}{prev_block}
+
+        Canal del follow-up: {channel}
+        Dias desde el ultimo contacto: {days_since_last_contact}
+
+        {channel_rules}
+
+        Escribi el follow-up SOLO con texto (sin JSON, sin explicaciones).
+        Si es email, asunto en la primera linea.
+        Recorda usar un ANGULO DISTINTO al mensaje anterior.
+    """).strip()
+
+
 def build_analyze_lead_prompt(
     lead: LeadContext,
     catalog: list[CatalogService],

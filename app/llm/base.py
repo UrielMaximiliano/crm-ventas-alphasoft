@@ -71,6 +71,35 @@ class LeadIntel:
     prompt_version: str
 
 
+@dataclass(slots=True)
+class SuggestedQuery:
+    rubro: str
+    city: str
+    province: str | None
+    reason: str  # por que el LLM sugiere esta combinacion
+
+
+@dataclass(slots=True)
+class ReplyAnalysis:
+    intent: str  # ver app.db.models.ReplyIntent
+    sentiment: str  # "positive" | "neutral" | "negative"
+    summary: str  # 1 linea resumen de lo que dijo
+    suggested_action: str  # que hacer ahora (3-4 lineas)
+    suggested_reply: str  # mensaje sugerido para responder al cliente
+    model: str
+    prompt_version: str
+
+
+@dataclass(slots=True)
+class FollowUpMessage:
+    body: str
+    channel: Channel
+    subject: str | None
+    angle: str  # angulo distinto al del 1er mensaje (ej: "social proof", "case study")
+    model: str
+    prompt_version: str
+
+
 class LLMClient(Protocol):
     async def generate_message(
         self,
@@ -87,3 +116,31 @@ class LLMClient(Protocol):
         site_html_excerpt: str = "",
         website_status: str = "",
     ) -> LeadIntel: ...
+
+    async def suggest_queries(
+        self,
+        *,
+        country: str = "AR",
+        focus: str = "PyMEs con baja madurez digital",
+        existing_queries: list[str] | None = None,
+        count: int = 10,
+    ) -> list[SuggestedQuery]: ...
+
+    async def classify_reply(
+        self,
+        lead: LeadContext,
+        raw_reply: str,
+        catalog: list[CatalogService],
+        *,
+        previous_messages: list[GeneratedMessage] | None = None,
+    ) -> ReplyAnalysis: ...
+
+    async def generate_followup(
+        self,
+        lead: LeadContext,
+        channel: Channel,
+        catalog: list[CatalogService],
+        *,
+        previous_messages: list[GeneratedMessage] | None = None,
+        days_since_last_contact: int = 5,
+    ) -> FollowUpMessage: ...

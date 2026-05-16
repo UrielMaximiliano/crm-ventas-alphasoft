@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Stats — CRM Alphasoft{% endblock %}
+
+{% block content %}
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h1 class="text-2xl font-semibold">Dashboard</h1>
+      <p class="text-sm text-slate-500">
+        Snapshot del pipeline · Scraper {{ "MOCK" if mock else "REAL" }} · LLM {{ "MOCK" if mock_llm else "GROQ" }}
+      </p>
+    </div>
+    <a href="/" class="text-sm px-3 py-2 rounded bg-slate-900 text-white hover:bg-slate-700">Volver a leads</a>
+  </div>
+
+  <!-- KPIs principales -->
+  <section class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+    <div class="bg-white border border-slate-200 rounded-lg p-3">
+      <div class="text-xs text-slate-500">Total leads</div>
+      <div class="mt-1 text-2xl font-semibold">{{ stats.total_leads }}</div>
+    </div>
+    <div class="bg-white border border-emerald-200 rounded-lg p-3">
+      <div class="text-xs text-emerald-700">Calificados (listos)</div>
+      <div class="mt-1 text-2xl font-semibold text-emerald-700">{{ stats.qualified_ready }}</div>
+    </div>
+    <div class="bg-white border border-blue-200 rounded-lg p-3">
+      <div class="text-xs text-blue-700">Contactados</div>
+      <div class="mt-1 text-2xl font-semibold text-blue-700">{{ stats.contacted }}</div>
+    </div>
+    <div class="bg-white border border-indigo-200 rounded-lg p-3">
+      <div class="text-xs text-indigo-700">Respondieron</div>
+      <div class="mt-1 text-2xl font-semibold text-indigo-700">{{ stats.replied }}</div>
+    </div>
+    <div class="bg-white border border-amber-200 rounded-lg p-3" title="replied / contacted">
+      <div class="text-xs text-amber-700">Tasa de respuesta</div>
+      <div class="mt-1 text-2xl font-semibold text-amber-700">{{ stats.reach_rate_pct }}%</div>
+    </div>
+    <div class="bg-white border border-rose-200 rounded-lg p-3">
+      <div class="text-xs text-rose-700">Follow-ups vencidos</div>
+      <div class="mt-1 text-2xl font-semibold text-rose-700">{{ stats.due_followups }}</div>
+    </div>
+  </section>
+
+  <!-- Funnel + Contactos -->
+  <section class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <div class="text-sm font-semibold mb-3">Funnel comercial</div>
+      {% set total = stats.total_leads or 1 %}
+      {% set stages = [
+        ("Descubiertos", stats.total_leads, "bg-slate-400"),
+        ("Calificados", stats.qualified_ready + stats.contacted + stats.replied, "bg-emerald-500"),
+        ("Contactados", stats.contacted + stats.replied, "bg-blue-500"),
+        ("Respondieron", stats.replied, "bg-indigo-500"),
+      ] %}
+      <div class="space-y-2">
+        {% for label, count, color in stages %}
+          {% set pct = ((count / total) * 100) | round(0, 'floor') if total else 0 %}
+          <div>
+            <div class="flex justify-between text-xs text-slate-600 mb-0.5">
+              <span>{{ label }}</span>
+              <span><b>{{ count }}</b> · {{ pct }}%</span>
+            </div>
+            <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+              <div class="{{ color }} h-3 rounded-full" style="width: {{ pct }}%"></div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <div class="text-sm font-semibold mb-3">Datos extraídos</div>
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <div class="text-xs text-slate-500">Leads con contacto</div>
+          <div class="text-xl font-semibold">{{ stats.leads_with_contact }}<span class="text-xs text-slate-400">/ {{ stats.total_leads }}</span></div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Con email del HTML</div>
+          <div class="text-xl font-semibold">{{ stats.leads_with_email }}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Mensajes generados</div>
+          <div class="text-xl font-semibold">{{ stats.total_messages }}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Mensajes enviados</div>
+          <div class="text-xl font-semibold">{{ stats.sent_messages }}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Follow-ups pendientes</div>
+          <div class="text-xl font-semibold">{{ stats.pending_followups }}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Descartados</div>
+          <div class="text-xl font-semibold text-rose-700">{{ stats.discarded }}</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Por ciudad / rubro -->
+  <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <div class="text-sm font-semibold mb-3">Por ciudad (top 8)</div>
+      <ul class="space-y-1 text-sm">
+        {% for row in stats.by_city %}
+          <li class="flex justify-between">
+            <a href="/?city={{ row.city }}" class="text-blue-600 hover:underline">{{ row.city }}</a>
+            <span class="font-semibold">{{ row.count }}</span>
+          </li>
+        {% else %}
+          <li class="text-slate-400 text-xs">Sin datos todavía</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <div class="text-sm font-semibold mb-3">Por rubro (top 8)</div>
+      <ul class="space-y-1 text-sm">
+        {% for row in stats.by_category %}
+          <li class="flex justify-between">
+            <a href="/?category={{ row.category }}" class="text-blue-600 hover:underline truncate mr-2">{{ row.category }}</a>
+            <span class="font-semibold">{{ row.count }}</span>
+          </li>
+        {% else %}
+          <li class="text-slate-400 text-xs">Sin datos todavía</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <div class="text-sm font-semibold mb-3">Distribución de scores LLM</div>
+      {% if stats.by_score %}
+        <ul class="space-y-1 text-sm">
+          {% for row in stats.by_score %}
+            {% set color = "bg-rose-500" if row.score >= 8 else ("bg-amber-500" if row.score >= 5 else "bg-slate-400") %}
+            <li class="flex items-center gap-2">
+              <span class="w-8 text-xs text-slate-500">{{ row.score }}/10</span>
+              <div class="flex-1 bg-slate-100 rounded h-3">
+                <div class="{{ color }} h-3 rounded" style="width: {{ (row.count * 100 / stats.total_leads) if stats.total_leads else 0 }}%"></div>
+              </div>
+              <span class="w-8 text-xs font-semibold text-right">{{ row.count }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-xs text-slate-400">Corré "Verificar webs" para que el LLM genere scores.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Respuestas clasificadas -->
+  {% if stats.by_intent %}
+  <section class="bg-white border border-slate-200 rounded-lg p-4 mb-6">
+    <div class="text-sm font-semibold mb-3">Respuestas de clientes (clasificadas por LLM)</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {% for row in stats.by_intent %}
+        <div class="text-center bg-slate-50 border border-slate-100 rounded p-2">
+          <div class="text-xs text-slate-500">{{ row.intent }}</div>
+          <div class="text-xl font-semibold">{{ row.count }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+{% endblock %}

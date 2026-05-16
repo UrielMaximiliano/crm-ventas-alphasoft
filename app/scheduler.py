@@ -21,6 +21,7 @@ from app.db.models import JobRun
 from app.db.session import session_scope
 from app.jobs.discover import run_discover
 from app.jobs.enrich import run_enrich
+from app.jobs.followup import run_pending_followups
 from app.jobs.generate import run_generate_all
 from app.scrapers.factory import get_lead_provider
 
@@ -45,6 +46,12 @@ async def _job_generate() -> None:
     async with session_scope() as session:
         stats = await run_generate_all(session)
         logger.info("[scheduler] generate -> %s", stats)
+
+
+async def _job_followups() -> None:
+    async with session_scope() as session:
+        stats = await run_pending_followups(session)
+        logger.info("[scheduler] followups -> %s", stats.to_dict())
 
 
 async def _last_run(job_name: str) -> datetime | None:
@@ -97,6 +104,15 @@ def build_scheduler() -> AsyncIOScheduler:
         _job_generate,
         trigger=IntervalTrigger(hours=1),
         id="generate_periodic",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # Follow-ups: cada 6h. Procesa los FollowUpTask cuyo scheduled_for <= now.
+    scheduler.add_job(
+        _job_followups,
+        trigger=IntervalTrigger(hours=6),
+        id="followups_periodic",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

@@ -46,12 +46,32 @@
           Pipeline completo
         </button>
       </form>
+      <button type="button"
+              class="text-sm px-3 py-2 rounded bg-purple-700 text-white hover:bg-purple-600"
+              title="El LLM te sugiere rubros + ciudades nuevos para prospectar"
+              hx-post="/ui/llm/suggest-queries"
+              hx-target="#suggest-queries-target"
+              hx-indicator="#suggest-indicator">
+        Sugerir queries con IA
+      </button>
       <a href="/api/leads/export.xlsx{% if request.url.query %}?{{ request.url.query }}{% endif %}"
          class="text-sm px-3 py-2 rounded bg-green-800 text-white hover:bg-green-700"
          title="Descarga los leads filtrados como xlsx para abrir en Excel">
         Exportar a Excel
       </a>
+      <form method="post" action="/ui/jobs/followups"
+            onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerText='Procesando...';"
+            class="inline">
+        <button class="text-sm px-3 py-2 rounded bg-amber-700 text-white hover:bg-amber-600 disabled:opacity-60"
+                title="Ejecuta los follow-ups que vencieron (LLM genera mensaje con angulo distinto)">
+          Procesar follow-ups
+        </button>
+      </form>
     </div>
+    <span id="suggest-indicator" class="htmx-indicator block mt-3 text-xs text-purple-700">
+      ⏳ Pidiéndole al LLM ideas de prospección...
+    </span>
+    <div id="suggest-queries-target" class="mt-3"></div>
     <details class="mt-3 text-xs text-slate-500">
       <summary class="cursor-pointer hover:text-slate-700">Acciones individuales (avanzado)</summary>
       <div class="mt-2 flex flex-wrap gap-2 items-center">
@@ -294,6 +314,108 @@
         Sin mensaje generado.
       </div>
       {% endif %}
+
+      <!-- Tags + Follow-ups info -->
+      <div class="border-t border-slate-100 pt-3 mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-slate-400 uppercase tracking-wide">Tags:</span>
+        {% for t in lead.tags %}
+          <form method="post" action="/ui/leads/{{ lead.id }}/tags/{{ t }}/remove" class="inline">
+            <button type="submit"
+                    class="text-xs px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700"
+                    title="Click para borrar">#{{ t }} ✕</button>
+          </form>
+        {% endfor %}
+        <form method="post" action="/ui/leads/{{ lead.id }}/tags" class="inline flex items-center gap-1">
+          <input type="text" name="tag" placeholder="agregar tag"
+                 class="text-xs px-2 py-0.5 border border-slate-200 rounded w-32"
+                 maxlength="64" />
+          <button class="text-xs text-slate-500 hover:text-slate-900">+</button>
+        </form>
+
+        {% if lead.next_followup_at %}
+          <span class="ml-auto text-amber-700">
+            ⏰ Próximo follow-up: <b>{{ lead.next_followup_at[:16].replace("T", " ") }}</b>
+          </span>
+        {% endif %}
+      </div>
+
+      <!-- Clasificación de respuesta del cliente -->
+      {% if lead.last_reply_classification %}
+        {% set rc = lead.last_reply_classification %}
+        {% set intent_color = {
+          "interested": "bg-emerald-100 text-emerald-800 border-emerald-200",
+          "ask_meeting": "bg-emerald-100 text-emerald-800 border-emerald-200",
+          "ask_info": "bg-blue-100 text-blue-800 border-blue-200",
+          "pricing_objection": "bg-amber-100 text-amber-800 border-amber-200",
+          "not_interested": "bg-rose-100 text-rose-700 border-rose-200",
+          "wrong_contact": "bg-slate-100 text-slate-700 border-slate-200",
+          "spam": "bg-slate-100 text-slate-500 border-slate-200",
+          "unknown": "bg-slate-100 text-slate-600 border-slate-200",
+        } %}
+        <div class="border-t border-slate-100 pt-3 mt-3 text-sm">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-xs uppercase tracking-wide font-semibold text-indigo-700">Respuesta del cliente</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full border {{ intent_color.get(rc.intent, intent_color.unknown) }}">{{ rc.intent }}</span>
+            {% if rc.sentiment %}<span class="text-[10px] text-slate-500">· {{ rc.sentiment }}</span>{% endif %}
+          </div>
+          {% if rc.summary %}<div class="text-slate-700 mb-1 italic">"{{ rc.summary }}"</div>{% endif %}
+          {% if rc.suggested_action %}
+            <div class="text-xs text-slate-600 mb-1"><b>Acción sugerida:</b> {{ rc.suggested_action }}</div>
+          {% endif %}
+          {% if rc.suggested_reply %}
+            <div class="bg-slate-50 border border-slate-100 rounded p-2 mt-1 relative">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-semibold text-slate-600">Respuesta sugerida</span>
+                <button class="text-xs px-2 py-0.5 rounded bg-slate-900 text-white hover:bg-slate-700"
+                  onclick="navigator.clipboard.writeText(this.parentElement.nextElementSibling.innerText); this.innerText='Copiado'; setTimeout(()=>this.innerText='Copiar',1200);">
+                  Copiar
+                </button>
+              </div>
+              <pre class="whitespace-pre-wrap text-sm text-slate-800 font-sans">{{ rc.suggested_reply }}</pre>
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <!-- Pegar respuesta del cliente para clasificar -->
+      <details class="border-t border-slate-100 pt-3 mt-3">
+        <summary class="text-xs text-slate-500 hover:text-slate-800 cursor-pointer">
+          📨 Pegar respuesta del cliente y clasificar con LLM
+        </summary>
+        <form method="post" action="/ui/leads/{{ lead.id }}/classify-reply" class="mt-2 flex gap-2">
+          <textarea name="raw_reply" rows="3" required maxlength="10000"
+                    class="flex-1 text-sm border border-slate-200 rounded p-2"
+                    placeholder="Pegar acá lo que el cliente respondió por WhatsApp o email..."></textarea>
+          <button class="text-xs px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-500 self-start">
+            Clasificar
+          </button>
+        </form>
+      </details>
+
+      <!-- Notas del equipo -->
+      <details class="border-t border-slate-100 pt-3 mt-3">
+        <summary class="text-xs text-slate-500 hover:text-slate-800 cursor-pointer">
+          📝 Notas internas ({{ lead.notes|length }})
+        </summary>
+        <div class="mt-2 space-y-2">
+          {% for n in lead.notes %}
+            <div class="bg-slate-50 border border-slate-100 rounded p-2 text-sm">
+              <div class="text-[10px] text-slate-400 mb-0.5">
+                {{ n.created_at[:16].replace("T", " ") }}{% if n.author %} · {{ n.author }}{% endif %}
+              </div>
+              <div class="whitespace-pre-wrap text-slate-700">{{ n.body }}</div>
+            </div>
+          {% endfor %}
+          <form method="post" action="/ui/leads/{{ lead.id }}/notes" class="flex gap-2">
+            <textarea name="body" rows="2" required maxlength="10000"
+                      class="flex-1 text-sm border border-slate-200 rounded p-2"
+                      placeholder="Notita rápida (ej: 'hablé con el dueño, vuelve a llamar el martes')"></textarea>
+            <button class="text-xs px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-600 self-start">
+              Agregar
+            </button>
+          </form>
+        </div>
+      </details>
 
       <footer class="border-t border-slate-100 pt-3 mt-4 flex flex-wrap gap-2">
         <form method="post" action="/ui/leads/{{ lead.id }}/generate" class="inline">
