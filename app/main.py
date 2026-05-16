@@ -135,7 +135,14 @@ async def _fetch_leads(
     only_no_web: bool = False,
     limit: int = 100,
 ) -> list[Lead]:
-    stmt = select(Lead).options(selectinload(Lead.messages)).order_by(desc(Lead.created_at))
+    # Orden: primero por priority_score DESC (mas prometedores arriba), despues
+    # por created_at DESC. NULLS LAST en score para que los todavia-no-analizados
+    # caigan abajo.
+    stmt = (
+        select(Lead)
+        .options(selectinload(Lead.messages))
+        .order_by(Lead.priority_score.desc().nulls_last(), desc(Lead.created_at))
+    )
     if city:
         stmt = stmt.where(Lead.city == city)
     if category:
@@ -303,6 +310,20 @@ def _lead_to_view(lead: Lead) -> dict:
         "next_action": _next_action(lead, messages),
         "has_contact": bool(lead.phone or lead.email),
         "has_website": bool(lead.website),
+        # Intel del LLM (puede ser None si todavia no se enriched con analyze_lead)
+        "priority_score": lead.priority_score,
+        "priority_score_reason": lead.priority_reason,
+        "site_analysis": lead.site_analysis,
+        "pain_points": [
+            p.strip() for p in (lead.pain_points or "").split("|") if p.strip()
+        ],
+        "recommended_service": lead.recommended_service,
+        "extracted_emails": [
+            e.strip() for e in (lead.extracted_emails or "").split("|") if e.strip()
+        ],
+        "extracted_phones": [
+            p.strip() for p in (lead.extracted_phones or "").split("|") if p.strip()
+        ],
     }
 
 
@@ -506,6 +527,44 @@ async def ui_jobs_enrich(
 ) -> RedirectResponse:
     await run_enrich(session, only_pending=True)
     return _redirect_home(request)
+
+
+@app.post("/ui/jobs/pipeline")
+async def ui_jobs_pipeline(
+    request: Request,
+    max_queries: int | None = Query(3, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    """Encadena discover -> enrich -> generate en una sola operacion.
+
+    Resuelve la race condition de antes: si el usuario apretaba los 3 botones
+    en orden rapido, enrich/generate corrian contra una DB vacia porque
+    discover commitea recien al final.
+    """
+    provider = get_lead_provider()
+    await run_discover(session, provider, max_queries=max_queries)
+    await run_enrich(session, only_pending=True)
+    await run_generate_all(session)
+    return _redirect_home(request)
+
+
+@app.post("/api/jobs/pipeline")
+async def api_jobs_pipeline(
+    max_queries: int | None = Query(3, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    """Version JSON de /ui/jobs/pipeline. Devuelve stats de cada etapa."""
+    provider = get_lead_provider()
+    discover_stats = await run_discover(session, provider, max_queries=max_queries)
+    enrich_stats = await run_enrich(session, only_pending=True)
+    generate_stats = await run_generate_all(session)
+    return JSONResponse(
+        {
+            "discover": discover_stats.to_dict(),
+            "enrich": enrich_stats,
+            "generate": generate_stats,
+        }
+    )
 
 
 @app.post("/ui/leads/{lead_id}/generate")

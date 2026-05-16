@@ -53,3 +53,27 @@ async def test_empty_catalog_does_not_crash():
     client = MockLLMClient()
     msg = await client.generate_message(lead, "whatsapp", [])
     assert msg.body  # genera algo aunque sea generico
+
+
+async def test_analyze_lead_no_website_alta_prioridad():
+    lead = LeadContext(name="Pizzeria Roma", city="Cordoba", has_website=False)
+    intel = await MockLLMClient().analyze_lead(lead, CATALOG, website_status="sin-web")
+    assert intel.priority_score >= 7  # sin web = oportunidad clara
+    assert intel.pain_points
+    assert intel.recommended_service == "landing-page-pyme"
+
+
+async def test_analyze_lead_wix_recommends_migration():
+    lead = LeadContext(
+        name="Estudio Lopez", has_website=True, website="https://lopez.wix.com",
+    )
+    intel = await MockLLMClient().analyze_lead(lead, CATALOG, website_status="wix")
+    assert intel.recommended_service == "migracion-wix-wordpress"
+    assert "Wix" in intel.priority_reason or "Wix" in intel.pain_points[0]
+
+
+async def test_analyze_lead_rating_alto_sube_score():
+    lead = LeadContext(name="X", has_website=False, rating=4.8)
+    intel = await MockLLMClient().analyze_lead(lead, CATALOG, website_status="sin-web")
+    # Sin web da 8, +1 por rating alto = 9
+    assert intel.priority_score >= 8

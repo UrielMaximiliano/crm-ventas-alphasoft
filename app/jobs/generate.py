@@ -34,6 +34,9 @@ def _lead_to_context(lead: Lead) -> LeadContext:
         website_status=lead.website_status,
         rating=lead.rating,
         qualification_reason=lead.qualification_reason,
+        site_analysis=lead.site_analysis,
+        pain_points=lead.pain_points,
+        recommended_service=lead.recommended_service,
     )
 
 

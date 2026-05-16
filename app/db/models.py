@@ -75,6 +75,15 @@ class Lead(Base):
     website_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Intel del LLM (lo llena el job enrich + analyze_lead). Null si nunca se analizo.
+    priority_score: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    priority_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    site_analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pain_points: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommended_service: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    extracted_emails: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extracted_phones: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     last_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_enriched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -452,6 +452,18 @@ docker compose up -d --force-recreate agent
 - Verificar `GROQ_API_KEY` en `.env` (sin espacios, sin comillas).
 - Regenerar la key en https://console.groq.com/keys
 
+### Groq devuelve 429 — `Rate limit reached ... tokens per day`
+El **tier free es 100K tokens/día**. Con `analyze_lead` activo (el LLM analiza el HTML del sitio + scoring), cada lead completamente procesado consume:
+- ~4K tokens para `analyze_lead` (si el sitio carga; ~1K si está caído)
+- ~2K tokens para WhatsApp
+- ~3K tokens para Email
+- **Total ~9K tokens × 25 leads/día = 225K** → excede el free.
+
+**Soluciones**:
+- Procesar ≤ 20 leads/día con el free → para validar.
+- Upgradear a **Dev Tier** en https://console.groq.com/settings/billing (~$0.50 por millón de tokens entrada, te da para miles de leads/día).
+- Los leads que fallaron quedan en DB con su intel; correr "Generar mensajes pendientes" al día siguiente completa los faltantes (idempotente).
+
 ### Los mensajes salen en otro idioma o sin voseo
 - Revisar `SYSTEM_PROMPT` en [`app/llm/prompts.py`](app/llm/prompts.py).
 - Probar otro modelo (algunos respetan más las instrucciones de tono).

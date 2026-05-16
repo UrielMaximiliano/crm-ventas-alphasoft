@@ -33,18 +33,25 @@ _TOP_ALIGN = Alignment(vertical="top")
 # (header, width, wrap?)
 _COLUMNS: list[tuple[str, int, bool]] = [
     ("ID", 6, False),
+    ("Score", 7, False),
+    ("Score Reason", 32, True),
     ("Nombre", 30, False),
     ("Rubro", 22, False),
     ("Ciudad", 18, False),
     ("Provincia", 18, False),
     ("Telefono", 18, False),
     ("Email", 30, False),
+    ("Emails Extra", 30, True),
+    ("Telefonos Extra", 22, True),
     ("Sitio Web", 32, False),
     ("Estado Sitio", 14, False),
     ("Direccion", 38, True),
     ("Rating", 8, False),
     ("Estado", 12, False),
     ("Razon Calificacion", 28, True),
+    ("Analisis del Sitio", 50, True),
+    ("Dolores Detectados", 40, True),
+    ("Servicio Sugerido", 22, False),
     ("Search Query", 28, False),
     ("Mensaje WhatsApp", 60, True),
     ("Asunto Email", 36, True),
@@ -86,18 +93,25 @@ def build_leads_xlsx(leads: list[Lead]) -> bytes:
         eml = msgs.get(MessageChannel.EMAIL.value)
         row_values: list[str | int | float | None] = [
             lead.id,
+            lead.priority_score,
+            lead.priority_reason,
             lead.name,
             lead.category,
             lead.city,
             lead.province,
             lead.phone,
             lead.email,
+            lead.extracted_emails,
+            lead.extracted_phones,
             lead.website,
             lead.website_status,
             lead.address,
             lead.rating,
             lead.status.value if lead.status else None,
             lead.qualification_reason,
+            lead.site_analysis,
+            lead.pain_points,
+            lead.recommended_service,
             lead.search_query,
             wsp.body if wsp else None,
             eml.subject if eml else None,
@@ -111,13 +125,17 @@ def build_leads_xlsx(leads: list[Lead]) -> bytes:
             _, _, wrap = _COLUMNS[c_offset - 1]
             cell.alignment = _WRAP if wrap else _TOP_ALIGN
 
-        # Hyperlinks - hago el href clickable pero sigo mostrando el texto
-        web_cell = ws.cell(row=r_offset, column=8)
+        # Hyperlinks - hago el href clickable pero sigo mostrando el texto.
+        # Las columnas se mueven si _COLUMNS cambia: las resolvemos por nombre.
+        web_col = next(i for i, c in enumerate(_COLUMNS, start=1) if c[0] == "Sitio Web")
+        maps_col = next(i for i, c in enumerate(_COLUMNS, start=1) if c[0] == "Maps URL")
+
+        web_cell = ws.cell(row=r_offset, column=web_col)
         if lead.website and lead.website.startswith(("http://", "https://")):
             web_cell.hyperlink = lead.website
             web_cell.font = Font(name="Arial", size=10, color="1F6FEB", underline="single")
 
-        maps_cell = ws.cell(row=r_offset, column=18)
+        maps_cell = ws.cell(row=r_offset, column=maps_col)
         if lead.source_id and lead.source_id.startswith(("http://", "https://")):
             maps_cell.hyperlink = lead.source_id
             maps_cell.font = Font(name="Arial", size=10, color="1F6FEB", underline="single")

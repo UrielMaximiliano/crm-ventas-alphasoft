@@ -100,6 +100,7 @@ class WebsiteAssessment:
     reason: str
     status_tag: str  # "sin-web", "caido", "error-4xx", "wix", "wordpress-viejo", "viejo", "no-mobile", "ok"
     emails: tuple[str, ...] = ()  # emails encontrados en el HTML
+    body_excerpt: str = ""  # primeros 5000 chars del body, para pasarselos al LLM
 
 
 def assess_no_website() -> WebsiteAssessment:
@@ -177,6 +178,8 @@ async def assess_website(url: str, *, timeout: float = 8.0) -> WebsiteAssessment
 
     # Emails se extraen una sola vez para todas las ramas que tengan body util
     emails_t = tuple(extract_emails(body))
+    # Excerpt para pasarle al LLM en analyze_lead (no toda la pagina, solo cabecera)
+    body_excerpt = body[:5000] if body else ""
 
     if 500 <= status < 600:
         return WebsiteAssessment(
@@ -184,6 +187,7 @@ async def assess_website(url: str, *, timeout: float = 8.0) -> WebsiteAssessment
             title=None, generator=None, has_viewport=False, copyright_year=None,
             qualifies=True, reason=f"sitio con error {status}", status_tag="caido",
             emails=emails_t,
+            body_excerpt=body_excerpt,
         )
     if 400 <= status < 500:
         return WebsiteAssessment(
@@ -191,6 +195,7 @@ async def assess_website(url: str, *, timeout: float = 8.0) -> WebsiteAssessment
             title=None, generator=None, has_viewport=False, copyright_year=None,
             qualifies=True, reason=f"sitio con error {status}", status_tag="error-4xx",
             emails=emails_t,
+            body_excerpt=body_excerpt,
         )
 
     title_m = _TITLE_RX.search(body)
@@ -221,6 +226,7 @@ async def assess_website(url: str, *, timeout: float = 8.0) -> WebsiteAssessment
                 reason=f"plataforma desactualizada ({platform.split()[0]})",
                 status_tag="wix" if "wix" in platform else "viejo",
                 emails=emails_t,
+                body_excerpt=body_excerpt,
             )
 
     now_year = datetime.now().year
@@ -233,6 +239,7 @@ async def assess_website(url: str, *, timeout: float = 8.0) -> WebsiteAssessment
             reason=f"sin actualizar desde {copyright_year}",
             status_tag="viejo",
             emails=emails_t,
+            body_excerpt=body_excerpt,
         )
 
     if not has_viewport:
@@ -244,6 +251,7 @@ async def assess_website(url: str, *, timeout: float = 8.0) -> WebsiteAssessment
             reason="no es mobile-friendly",
             status_tag="no-mobile",
             emails=emails_t,
+            body_excerpt=body_excerpt,
         )
 
     if ttfb_ms and ttfb_ms > 4000:
@@ -255,6 +263,7 @@ async def assess_website(url: str, *, timeout: float = 8.0) -> WebsiteAssessment
             reason=f"carga lenta ({ttfb_ms}ms)",
             status_tag="lento",
             emails=emails_t,
+            body_excerpt=body_excerpt,
         )
 
     return WebsiteAssessment(
@@ -265,4 +274,5 @@ async def assess_website(url: str, *, timeout: float = 8.0) -> WebsiteAssessment
         reason="sitio en buen estado",
         status_tag="ok",
         emails=emails_t,
+        body_excerpt=body_excerpt,
     )

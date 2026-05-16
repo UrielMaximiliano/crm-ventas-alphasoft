@@ -25,6 +25,10 @@ class LeadContext:
     website_status: str | None = None  # ej: "sin-web", "wix-viejo", "ssl-roto"
     rating: float | None = None
     qualification_reason: str | None = None
+    # Intel del LLM (opcional, agregado en enrich.analyze_lead)
+    site_analysis: str | None = None
+    pain_points: str | None = None  # separados por " | "
+    recommended_service: str | None = None
 
 
 @dataclass(slots=True)
@@ -46,6 +50,27 @@ class GeneratedMessage:
     prompt_version: str
 
 
+@dataclass(slots=True)
+class LeadIntel:
+    """Analisis profundo de un lead generado por el LLM.
+
+    Combina tres utilidades en una sola llamada al LLM para ahorrar tokens:
+    - Analisis del sitio del negocio (que tiene mal, oportunidades concretas)
+    - Scoring 1-10 de prioridad comercial
+    - Extraccion ofuscada de emails/telefonos del HTML
+    """
+
+    priority_score: int  # 1-10
+    priority_reason: str  # 1 linea de por que ese score
+    site_analysis: str  # 2-3 frases sobre el estado del sitio
+    pain_points: list[str]  # dolores concretos detectados
+    recommended_service: str  # slug del catalogo que mejor calza
+    extracted_emails: list[str]  # emails que no encontro el regex (ofuscados, etc)
+    extracted_phones: list[str]  # telefonos extra
+    model: str
+    prompt_version: str
+
+
 class LLMClient(Protocol):
     async def generate_message(
         self,
@@ -53,3 +78,12 @@ class LLMClient(Protocol):
         channel: Channel,
         catalog: list[CatalogService],
     ) -> GeneratedMessage: ...
+
+    async def analyze_lead(
+        self,
+        lead: LeadContext,
+        catalog: list[CatalogService],
+        *,
+        site_html_excerpt: str = "",
+        website_status: str = "",
+    ) -> LeadIntel: ...

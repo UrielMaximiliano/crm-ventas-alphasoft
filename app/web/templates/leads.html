@@ -39,19 +39,11 @@
         </div>
       </div>
 
-      <form method="post" action="/ui/jobs/discover?max_queries=3">
-        <button class="text-sm px-3 py-2 rounded bg-slate-900 text-white hover:bg-slate-700">
-          Buscar leads
-        </button>
-      </form>
-      <form method="post" action="/ui/jobs/enrich">
-        <button class="text-sm px-3 py-2 rounded bg-amber-600 text-white hover:bg-amber-500">
-          Verificar webs
-        </button>
-      </form>
-      <form method="post" action="/ui/jobs/generate">
-        <button class="text-sm px-3 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-500">
-          Generar mensajes
+      <form method="post" action="/ui/jobs/pipeline?max_queries=3"
+            onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerText='Trabajando... (3-5 min)';">
+        <button class="text-sm px-4 py-2 rounded bg-indigo-700 text-white hover:bg-indigo-600 font-medium disabled:opacity-60"
+                title="Encadena buscar + verificar + generar en una sola operacion. Recomendado.">
+          Pipeline completo
         </button>
       </form>
       <a href="/api/leads/export.xlsx{% if request.url.query %}?{{ request.url.query }}{% endif %}"
@@ -60,6 +52,33 @@
         Exportar a Excel
       </a>
     </div>
+    <details class="mt-3 text-xs text-slate-500">
+      <summary class="cursor-pointer hover:text-slate-700">Acciones individuales (avanzado)</summary>
+      <div class="mt-2 flex flex-wrap gap-2 items-center">
+        <p class="text-amber-700 text-[11px] mr-2">
+          ⚠ NO uses estos en orden rapido: discover tarda 2-3 min y los demas correrian en vacio.
+          Usa <b>Pipeline completo</b> arriba en su lugar.
+        </p>
+        <form method="post" action="/ui/jobs/discover?max_queries=3"
+              onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerText='Buscando... (~3min)';">
+          <button class="text-xs px-2 py-1 rounded bg-slate-700 text-white hover:bg-slate-600 disabled:opacity-60">
+            Solo buscar
+          </button>
+        </form>
+        <form method="post" action="/ui/jobs/enrich"
+              onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerText='Verificando...';">
+          <button class="text-xs px-2 py-1 rounded bg-amber-700 text-white hover:bg-amber-600 disabled:opacity-60">
+            Solo verificar webs
+          </button>
+        </form>
+        <form method="post" action="/ui/jobs/generate"
+              onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerText='Generando...';">
+          <button class="text-xs px-2 py-1 rounded bg-emerald-700 text-white hover:bg-emerald-600 disabled:opacity-60">
+            Solo generar mensajes
+          </button>
+        </form>
+      </div>
+    </details>
   </section>
 
   <section class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
@@ -139,6 +158,14 @@
           <div class="flex flex-wrap items-center gap-2">
             <h2 class="text-lg font-semibold leading-tight">{{ lead.name }}</h2>
             <span class="text-xs text-slate-400">#{{ lead.id }}</span>
+            {% if lead.priority_score %}
+              {% set score = lead.priority_score %}
+              {% set score_class = 'bg-rose-600 text-white' if score >= 8 else ('bg-amber-500 text-white' if score >= 5 else 'bg-slate-300 text-slate-700') %}
+              <span class="text-xs px-2 py-0.5 rounded-full font-semibold {{ score_class }}"
+                    title="{{ lead.priority_score_reason or 'Score generado por LLM' }}">
+                Score {{ score }}/10
+              </span>
+            {% endif %}
             <span class="text-xs px-2 py-0.5 rounded-full border {{ priority_colors.get(lead.priority_tone, priority_colors.slate) }}">
               Prioridad {{ lead.priority_label }}
             </span>
@@ -186,6 +213,48 @@
           {% if lead.address %}<div class="mt-1 text-xs text-slate-500">{{ lead.address }}</div>{% endif %}
         </div>
       </div>
+
+      {% if lead.site_analysis or lead.pain_points or lead.extracted_emails or lead.extracted_phones %}
+      <div class="bg-indigo-50 border border-indigo-100 rounded-md p-3 mb-3 text-sm">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-xs uppercase tracking-wide font-semibold text-indigo-700">Analisis del LLM</span>
+          {% if lead.priority_score_reason %}
+            <span class="text-xs text-indigo-600">· {{ lead.priority_score_reason }}</span>
+          {% endif %}
+        </div>
+        {% if lead.site_analysis %}
+          <div class="text-sm text-slate-700 mb-2">{{ lead.site_analysis }}</div>
+        {% endif %}
+        {% if lead.pain_points %}
+          <div class="text-xs text-slate-600 mb-1"><b>Dolores detectados:</b></div>
+          <ul class="list-disc list-inside text-sm text-slate-700 space-y-0.5 mb-2">
+            {% for pain in lead.pain_points %}
+              <li>{{ pain }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if lead.recommended_service %}
+          <div class="text-xs text-slate-600">
+            <b>Servicio sugerido:</b>
+            <code class="bg-white border border-indigo-200 px-1 rounded">{{ lead.recommended_service }}</code>
+          </div>
+        {% endif %}
+        {% if lead.extracted_emails %}
+          <div class="text-xs text-slate-600 mt-2">
+            <b>Emails extra:</b>
+            {% for e in lead.extracted_emails %}
+              <a href="mailto:{{ e }}" class="text-blue-600 hover:underline ml-1">{{ e }}</a>{% if not loop.last %},{% endif %}
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if lead.extracted_phones %}
+          <div class="text-xs text-slate-600 mt-1">
+            <b>Telefonos extra:</b>
+            <span class="ml-1">{{ lead.extracted_phones | join(", ") }}</span>
+          </div>
+        {% endif %}
+      </div>
+      {% endif %}
 
       {% if lead.messages %}
       <div class="border-t border-slate-100 pt-4 space-y-3">

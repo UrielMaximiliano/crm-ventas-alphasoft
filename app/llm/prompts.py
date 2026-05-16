@@ -54,6 +54,14 @@ def _format_lead_context(lead: LeadContext) -> str:
         lines.append("- Tiene sitio web: NO")
     if lead.qualification_reason:
         lines.append(f"- Por que es lead calificado: {lead.qualification_reason}")
+    # Intel del LLM si esta presente
+    if getattr(lead, "site_analysis", None):
+        lines.append(f"- Analisis del sitio: {lead.site_analysis}")
+    if getattr(lead, "pain_points", None):
+        pp = lead.pain_points if isinstance(lead.pain_points, str) else " | ".join(lead.pain_points)
+        lines.append(f"- Dolores concretos detectados: {pp}")
+    if getattr(lead, "recommended_service", None):
+        lines.append(f"- Servicio recomendado (del catalogo): {lead.recommended_service}")
     return "\n".join(lines)
 
 
@@ -146,3 +154,65 @@ def parse_email_response(text: str) -> tuple[str | None, str]:
         body = text[first_newline:].strip()
         return subject, body
     return None, text
+
+
+ANALYZE_SYSTEM_PROMPT = textwrap.dedent("""\
+    Sos un analista comercial de Alphasoft. Tu tarea es leer informacion de un
+    lead (negocio argentino) y, si tenemos el HTML de su sitio, evaluar la
+    oportunidad comercial concreta. Respondes SIEMPRE en JSON valido sin texto
+    extra alrededor, con esta estructura exacta:
+
+    {
+      "priority_score": <int 1-10>,
+      "priority_reason": "<una linea, 80 chars max>",
+      "site_analysis": "<2-3 frases sobre el estado del sitio o presencia digital>",
+      "pain_points": ["<dolor concreto>", "<otro dolor concreto>"],
+      "recommended_service": "<slug exacto del catalogo>",
+      "extracted_emails": ["<emails extra que veas en el HTML, incluso ofuscados>"],
+      "extracted_phones": ["<telefonos extra que veas, formato libre>"]
+    }
+
+    Criterio de score (1-10):
+    - 9-10: dolor evidente + negocio con clientes (>50 reseñas) + rubro de alto ticket
+    - 7-8: dolor evidente + negocio mediano, o sin dolor pero rubro premium
+    - 5-6: dolor mediano, conviene contactar pero sin urgencia
+    - 3-4: sitio decente o negocio chico
+    - 1-2: ya tiene un sitio en buen estado y modernidad, baja chance de cerrar
+
+    Reglas estrictas:
+    - "extracted_emails" / "extracted_phones": SOLO si los ves en el HTML.
+      Incluye emails ofuscados ("info AT empresa DOT com" -> "info@empresa.com",
+      "info [arroba] empresa" -> "info@empresa..."). NO inventes.
+    - "recommended_service" debe ser un slug del catalogo que te pasamos.
+    - "pain_points" maximo 3, en español, concretos y especificos al negocio.
+    - Si no tenemos HTML del sitio, basate solo en metadata + rubro + ciudad.
+    """)
+
+
+def build_analyze_lead_prompt(
+    lead: LeadContext,
+    catalog: list[CatalogService],
+    *,
+    site_html_excerpt: str = "",
+    website_status: str = "",
+) -> str:
+    catalog_slugs = [s.slug for s in catalog]
+    html_block = ""
+    if site_html_excerpt:
+        # Truncar para no quemar tokens: solo el head + primeros 3000 chars del body
+        excerpt = site_html_excerpt[:5000]
+        html_block = f"\n\nHTML del sitio (primeros 5000 chars):\n```html\n{excerpt}\n```"
+    elif website_status:
+        html_block = f"\n\n(No tenemos HTML del sitio. Estado detectado: {website_status})"
+
+    catalog_block = _format_catalog(catalog)
+
+    return textwrap.dedent(f"""\
+        Lead a analizar:
+        {_format_lead_context(lead)}
+
+        Catalogo de servicios de Alphasoft (slugs validos: {", ".join(catalog_slugs)}):
+        {catalog_block}{html_block}
+
+        Devolve UN JSON con la estructura del system prompt. Sin texto extra.
+    """).strip()
